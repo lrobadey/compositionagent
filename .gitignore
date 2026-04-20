@@ -1,0 +1,22 @@
+# Local OS noise
+.DS_Store
+Thumbs.db
+
+# Codex / workspace metadata
+.codex/
+
+# Node / Vite dependencies and build output
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+**/*.tsbuildinfo
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example

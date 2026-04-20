@@ -1,0 +1,24 @@
+{
+  "name": "midi-piano-roll",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "agent:proxy": "node agent-proxy/server.mjs",
+    "dev:full": "echo \"Run two terminals: (1) npm run agent:proxy  (2) npm run dev\"",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

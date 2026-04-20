@@ -1,0 +1,5 @@
+export const MAX_TOOL_CALLS_PER_RUN = 30;
+export const MAX_OPS_PER_PROPOSAL = 200;
+export const MAX_NOTES_ADDED_PER_PROPOSAL = 2000;
+export const MAX_NOTES_TOUCHED_PER_OP = 5000;
+
