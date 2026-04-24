@@ -7,6 +7,7 @@ import type { NoteLike } from "../lib/view/render";
 export type AgentTimelineEvent =
   | { type: "status"; message: string; at: number }
   | { type: "error"; message: string; at: number }
+  | { type: "thinking"; text: string; at: number }
   | { type: "tool_call_started"; name: string; argsPreview: string; at: number }
   | { type: "tool_call_delta"; name: string; argsPreview: string; at: number }
   | { type: "tool_call_done"; name: string; argsPreview: string; at: number }

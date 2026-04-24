@@ -283,6 +283,11 @@ textarea {
   color: #ffdada;
 }
 
+.timeline-item.thinking {
+  color: var(--faint);
+  font-style: italic;
+}
+
 .btn,
 .select,
 .input,

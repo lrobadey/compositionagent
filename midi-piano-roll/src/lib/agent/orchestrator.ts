@@ -51,6 +51,7 @@ export type ToolSummary = { name: string; callId: string; argsJsonText: string; 
 export type AgentStreamEvent =
   | { type: "status"; message: string }
   | { type: "error"; message: string; raw?: unknown }
+  | { type: "thinking"; text: string }
   | { type: "tool_call_started"; tool: ToolSummary }
   | { type: "tool_call_delta"; tool: ToolSummary; delta: string }
   | { type: "tool_call_done"; tool: ToolSummary }
@@ -165,7 +166,7 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
       tools,
       parallel_tool_calls: false,
       store: false,
-      reasoning: { effort: "medium" },
+      reasoning: { effort: "medium", summary: "auto" },
       input: inputList
     };
     if (stream) body.stream = true;
@@ -346,6 +347,12 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
           type: "tool_call_done",
           tool: { name: cur.name, callId: cur.call_id, argsJsonText: cur.arguments ?? "", outputIndex }
         });
+        continue;
+      }
+
+      if (t === "response.reasoning_summary_text.done") {
+        const text = typeof event?.text === "string" ? event.text.trim() : "";
+        if (text) params.onStreamEvent?.({ type: "thinking", text });
         continue;
       }
 

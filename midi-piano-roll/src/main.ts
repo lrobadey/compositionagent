@@ -490,6 +490,7 @@ const onStreamEvent = (e: AgentStreamEvent): void => {
     const at = Date.now();
     if (e.type === "status") return { type: "status", message: e.message, at };
     if (e.type === "error") return { type: "error", message: e.message, at };
+    if (e.type === "thinking") return { type: "thinking", text: e.text, at };
     if (e.type === "tool_call_started") return { type: "tool_call_started", name: e.tool.name, argsPreview: "", at };
     if (e.type === "tool_call_done") return { type: "tool_call_done", name: e.tool.name, argsPreview: e.tool.argsJsonText.slice(-800), at };
     if (e.type === "tool_applied") return { type: "tool_applied", name: e.tool.name, ok: e.ok, warnings: e.warnings, outputText: e.outputText, at };
@@ -511,6 +512,9 @@ const renderTimeline = (): void => {
     item.className = `timeline-item ${e.type}`;
     if (e.type === "status" || e.type === "error") {
       item.textContent = `${e.type === "error" ? "Error" : "Status"}: ${e.message}`;
+    } else if (e.type === "thinking") {
+      const preview = e.text.length > 300 ? e.text.slice(0, 300) + "…" : e.text;
+      item.textContent = `Thinking: ${preview}`;
     } else if (e.type === "tool_applied") {
       item.textContent = `${e.ok ? "Applied" : "Failed"} tool: ${e.name}${e.outputText ? ` - ${e.outputText}` : ""}`;
       if (e.warnings?.length) item.textContent += ` - ${e.warnings.length} warning${e.warnings.length === 1 ? "" : "s"}`;
