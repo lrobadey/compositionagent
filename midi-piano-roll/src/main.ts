@@ -3,7 +3,6 @@ import "./styles/app.css";
 import { MeasureMap } from "./lib/midi/measureMap";
 import { parseMidi } from "./lib/midi/parse";
 import { TempoMap } from "./lib/midi/tempoMap";
-import type { MidiProject } from "./lib/midi/types";
 import { applyOps } from "./lib/compose/apply";
 import { fromParsedMidiProject, toMidiFile } from "./lib/compose/convert";
 import type { ProjectState, TrackState, Note } from "./lib/compose/state";
@@ -32,17 +31,6 @@ if (!app) throw new Error("Missing #app");
 
 const layout = createLayout();
 app.append(layout.root);
-layout.header.overlayToggle.classList.add("active");
-layout.transport.tempoOverrideToggle.checked = getState().transport.tempoOverrideEnabled;
-layout.transport.tempoOverrideInput.value = String(getState().transport.tempoOverrideBpm);
-layout.transport.volumeInput.value = String(getState().transport.volume);
-layout.transport.toneSelect.value = getState().transport.tone;
-layout.transport.startModeSelect.value = getState().transport.startMode;
-layout.transport.loopModeSelect.value = getState().transport.loopMode;
-layout.header.gridSelect.value = String(getState().ui.gridSubdivision);
-layout.header.colorSelect.value = getState().ui.noteColorMode;
-layout.transport.loopToggle.classList.toggle("active", getState().transport.loopEnabled);
-layout.transport.metronomeToggle.classList.toggle("active", getState().transport.metronomeEnabled);
 
 const theme = readTheme();
 const camera = new Camera();
@@ -54,27 +42,10 @@ const notesCtx = mustCtx(layout.stage.notesCanvas);
 const overlayCtx = mustCtx(layout.stage.overlayCanvas);
 const keyboardCtx = mustCtx(layout.stage.keyboardCanvas);
 
-let parsedProject: MidiProject | null = null;
 let notesById: Map<string, Note> = new Map();
 let agentAbort: AbortController | null = null;
 let lastPlayheadTick = 0;
 const undoStack: import("./lib/compose/ops").ComposeOp[][] = [];
-
-const MUTATING_TOOL_NAMES = new Set([
-  "place_note",
-  "edit_note",
-  "add_notes",
-  "delete_notes",
-  "move_notes",
-  "resize_notes",
-  "set_velocity",
-  "clear_range",
-  "quantize",
-  "humanize",
-  "add_chord_progression",
-  "arpeggiate",
-  "add_drums_pattern"
-]);
 
 const defaultPitchRange = (): { min: number; max: number } => ({ min: 48, max: 84 });
 const computePitchRange = (notes: Note[]): { min: number; max: number } => {
@@ -86,12 +57,7 @@ const computePitchRange = (notes: Note[]): { min: number; max: number } => {
 
 const getActiveState = (): ProjectState | null => {
   const state = getState();
-  if (state.ui.scrubMode && state.agent.stepSnapshots[state.agent.stepIndex]) {
-    return state.project.proposal?.draftState ?? state.project.liveState;
-  }
   if (state.agent.running && state.agent.streamingDraftState) return state.agent.streamingDraftState;
-  if (state.project.proposal && state.ui.previewMode === "base") return state.project.proposal.baseState;
-  if (state.project.proposal && state.ui.previewMode === "draft") return state.project.proposal.draftState;
   return state.project.liveState;
 };
 
@@ -99,18 +65,10 @@ const getActiveTrack = (): TrackState | null => {
   const state = getActiveState();
   if (!state) return null;
   const idx = getState().project.selectedTrackIndex;
-  return state.tracks.find((x) => x.trackIndex === idx) ?? null;
+  return state.tracks.find((x) => x.trackIndex === idx) ?? state.tracks[0] ?? null;
 };
 
-const getDisplayNotes = (): NoteLike[] => {
-  const state = getState();
-  if (state.ui.scrubMode) {
-    const snap = state.agent.stepSnapshots[state.agent.stepIndex];
-    if (snap) return snap.notes;
-  }
-  const track = getActiveTrack();
-  return track ? track.notes : [];
-};
+const getDisplayNotes = (): NoteLike[] => getActiveTrack()?.notes ?? [];
 
 const recomputeMaps = (): void => {
   updateState((s) => {
@@ -122,26 +80,7 @@ const recomputeMaps = (): void => {
   });
 };
 
-const getTempoMapForTransport = (): TempoMap | null => {
-  const s = getState();
-  const base = s.project.tempoMap;
-  if (!base || !s.project.liveState) return base;
-  if (!s.transport.tempoOverrideEnabled) return base;
-  const override = Math.max(20, Math.min(300, s.transport.tempoOverrideBpm));
-  return new TempoMap(s.project.liveState.ppq, [{ tick: 0, bpm: override }], s.project.liveState.maxTick);
-};
-
-const getLoopRange = (): { startTick: number; endTick: number } | null => {
-  const s = getState();
-  if (!s.transport.loopEnabled) return null;
-  const scope = s.ui.scopeRect;
-  if (s.transport.loopMode === "scope" && scope) return { startTick: scope.tickStart, endTick: scope.tickEnd };
-  const track = getActiveTrack();
-  if (!track || track.notes.length === 0) return null;
-  const min = Math.min(...track.notes.map((n) => n.startTick));
-  const max = Math.max(...track.notes.map((n) => n.endTick));
-  return { startTick: min, endTick: max };
-};
+const getTempoMapForTransport = (): TempoMap | null => getState().project.tempoMap;
 
 const controller = new PianoRollController({
   rollElement: layout.stage.rollWrap,
@@ -151,16 +90,16 @@ const controller = new PianoRollController({
     const track = getActiveTrack();
     const maxTick = getActiveState()?.maxTick ?? 0;
     const range = track ? computePitchRange(track.notes) : defaultPitchRange();
-    const pitchMinRaw = range.min;
-    const pitchMaxRaw = range.max;
-    const pitchMin = Math.max(0, pitchMinRaw - 12);
-    const pitchMax = Math.min(127, pitchMaxRaw + 12);
-    return { maxTick, pitchMin, pitchMax };
+    return {
+      maxTick,
+      pitchMin: Math.max(0, range.min - 12),
+      pitchMax: Math.min(127, range.max + 12)
+    };
   },
   getNotes: () => getDisplayNotes(),
   getMeasureMap: () => getState().project.measureMap,
   getTempoMap: () => getTempoMapForTransport(),
-  getLoopRange: () => getLoopRange(),
+  getLoopRange: () => null,
   requestRender: () => renderAll(),
   onCursor: (info) => {
     const tick = Math.max(0, info.tick);
@@ -169,7 +108,7 @@ const controller = new PianoRollController({
     const mm = getState().project.measureMap;
     const mbt = mm ? mm.tickToBarBeatTick(tick) : null;
     const mbtText = mbt ? `${mbt.bar}:${mbt.beat}:${mbt.tick}` : `tick ${Math.round(tick)}`;
-    layout.stage.hudReadout.textContent = `Cursor ${mbtText} • ${pitchName}${info.noteId ? " • note" : ""}`;
+    layout.stage.hudReadout.textContent = `Cursor ${mbtText} - ${pitchName}${info.noteId ? " - note" : ""}`;
   },
   onSelectionChange: (sel) => updateInspector(sel),
   onPlayheadChange: (tick) => {
@@ -183,79 +122,24 @@ const controller = new PianoRollController({
   },
   onPlayingChange: (isPlaying) => {
     updateState((s) => ({ ...s, transport: { ...s.transport, isPlaying } }));
-    layout.transport.playBtn.textContent = isPlaying ? "Stop" : "Play";
+    layout.controls.playBtn.textContent = isPlaying ? "Stop" : "Play";
     if (isPlaying) startAudioFromTransport();
     else audio.stop();
   },
-  getScopeSelectEnabled: () => getState().ui.scopeSelectMode,
-  onScopeSelect: (range) => {
-    updateState((s) => ({
-      ...s,
-      ui: { ...s.ui, scopeRect: range, scopeSelectMode: false }
-    }));
-    layout.agent.scopeModeToggle.classList.remove("active");
-    layout.agent.scopeModeToggle.textContent = "Draw scope";
-    renderAll();
-  }
+  getScopeSelectEnabled: () => false,
+  onScopeSelect: () => undefined
 });
 
-layout.transport.playBtn.addEventListener("click", () => controller.togglePlay());
-layout.transport.loopToggle.addEventListener("click", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, loopEnabled: !s.transport.loopEnabled } }));
-  layout.transport.loopToggle.classList.toggle("active", getState().transport.loopEnabled);
-});
-layout.transport.metronomeToggle.addEventListener("click", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, metronomeEnabled: !s.transport.metronomeEnabled } }));
-  layout.transport.metronomeToggle.classList.toggle("active", getState().transport.metronomeEnabled);
-});
-layout.transport.tempoOverrideToggle.addEventListener("change", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, tempoOverrideEnabled: layout.transport.tempoOverrideToggle.checked } }));
-});
-layout.transport.tempoOverrideInput.addEventListener("input", () => {
-  const bpm = Number(layout.transport.tempoOverrideInput.value || "120");
-  updateState((s) => ({ ...s, transport: { ...s.transport, tempoOverrideBpm: bpm } }));
-});
-layout.transport.volumeInput.addEventListener("input", () => {
-  const v = Number(layout.transport.volumeInput.value || "0.6");
-  updateState((s) => ({ ...s, transport: { ...s.transport, volume: v } }));
-  audio.setVolume(v);
-});
-layout.transport.toneSelect.addEventListener("change", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, tone: layout.transport.toneSelect.value as any } }));
-});
-layout.transport.startModeSelect.addEventListener("change", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, startMode: layout.transport.startModeSelect.value as any } }));
-});
-layout.transport.loopModeSelect.addEventListener("change", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, loopMode: layout.transport.loopModeSelect.value as any } }));
-});
+layout.controls.playBtn.addEventListener("click", () => controller.togglePlay());
 
-layout.header.overlayToggle.addEventListener("click", () => {
-  updateState((s) => ({ ...s, ui: { ...s.ui, showOverlays: !s.ui.showOverlays } }));
-  layout.header.overlayToggle.classList.toggle("active", getState().ui.showOverlays);
-  renderAll();
-});
-layout.header.gridSelect.addEventListener("change", () => {
-  updateState((s) => ({ ...s, ui: { ...s.ui, gridSubdivision: Number(layout.header.gridSelect.value) as any } }));
-  renderAll();
-});
-layout.header.colorSelect.addEventListener("change", () => {
-  updateState((s) => ({ ...s, ui: { ...s.ui, noteColorMode: layout.header.colorSelect.value as any } }));
-  renderAll();
-});
-layout.header.helpBtn.addEventListener("click", () => layout.modal.shortcuts.classList.remove("hidden"));
-layout.modal.shortcutsClose.addEventListener("click", () => layout.modal.shortcuts.classList.add("hidden"));
-layout.modal.shortcuts.addEventListener("click", () => layout.modal.shortcuts.classList.add("hidden"));
-layout.modal.shortcuts.querySelector(".modal-card")?.addEventListener("click", (e) => e.stopPropagation());
-
-layout.header.newBtn.addEventListener("click", () => {
-  parsedProject = null;
+layout.controls.newBtn.addEventListener("click", () => {
   controller.stop();
   initProject(createBlankProject());
-  layout.agent.status.textContent = "Blank project ready. Enter a prompt and click Compose.";
+  layout.agent.status.textContent = "Blank piano roll ready.";
+  layout.controls.fileName.textContent = "Blank";
 });
 
-layout.header.exportBtn.addEventListener("click", () => {
+layout.controls.exportBtn.addEventListener("click", () => {
   const liveState = getState().project.liveState;
   if (!liveState) return;
   const bytes = toMidiFile(liveState);
@@ -270,105 +154,35 @@ layout.header.exportBtn.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-layout.header.fileInput.addEventListener("change", async () => {
-  const file = layout.header.fileInput.files?.[0];
+layout.controls.fileInput.addEventListener("change", async () => {
+  const file = layout.controls.fileInput.files?.[0];
   if (!file) return;
   const buf = await file.arrayBuffer();
   try {
-    parsedProject = parseMidi(buf);
+    initProject(fromParsedMidiProject(parseMidi(buf)));
+    layout.agent.status.textContent = `Loaded ${file.name}.`;
+    layout.controls.fileName.textContent = file.name;
   } catch (err) {
-    parsedProject = null;
     updateState((s) => ({ ...s, project: { ...s.project, liveState: null, proposal: null, tempoMap: null, measureMap: null } }));
     controller.stop();
     renderAll();
     console.error(err);
     alert("Failed to parse MIDI file.");
-    return;
   }
-  initProject(fromParsedMidiProject(parsedProject));
 });
 
-layout.project.playAllTracksToggle.addEventListener("click", () => {
-  updateState((s) => ({ ...s, transport: { ...s.transport, playAllTracks: !s.transport.playAllTracks } }));
-  layout.project.playAllTracksToggle.textContent = getState().transport.playAllTracks ? "Play: All" : "Play: Track";
+layout.controls.trackSelect.addEventListener("change", () => {
+  setTrackIndex(Number(layout.controls.trackSelect.value));
 });
-
-layout.project.scopePresetBar.addEventListener("click", () => {
-  const mm = getState().project.measureMap;
-  if (!mm) return;
-  const tickStart = barToTick(mm, 1);
-  const tickEnd = barToTick(mm, 9);
-  updateState((s) => ({ ...s, ui: { ...s.ui, scopeRect: { tickStart, tickEnd, pitchMin: 0, pitchMax: 127 } } }));
-  renderAll();
-});
-layout.project.scopePresetSelection.addEventListener("click", () => {
-  const track = getActiveTrack();
-  if (!track || controller.selection.size === 0) return;
-  const notes = track.notes.filter((n) => controller.selection.has(n.id));
-  if (!notes.length) return;
-  const tickStart = Math.min(...notes.map((n) => n.startTick));
-  const tickEnd = Math.max(...notes.map((n) => n.endTick));
-  const pitchMin = Math.min(...notes.map((n) => n.pitch));
-  const pitchMax = Math.max(...notes.map((n) => n.pitch));
-  updateState((s) => ({ ...s, ui: { ...s.ui, scopeRect: { tickStart, tickEnd, pitchMin, pitchMax } } }));
-  renderAll();
-});
-layout.project.scopePresetVisible.addEventListener("click", () => {
-  const range = camera.visibleTickRange();
-  const pitchRange = camera.visiblePitchRange();
-  updateState((s) => ({
-    ...s,
-    ui: {
-      ...s.ui,
-      scopeRect: {
-        tickStart: Math.max(0, Math.floor(range.min)),
-        tickEnd: Math.max(0, Math.ceil(range.max)),
-        pitchMin: Math.max(0, Math.floor(pitchRange.min)),
-        pitchMax: Math.min(127, Math.ceil(pitchRange.max))
-      }
-    }
-  }));
-  renderAll();
-});
-
-layout.agent.scopeModeToggle.addEventListener("click", () => {
-  updateState((s) => ({ ...s, ui: { ...s.ui, scopeSelectMode: !s.ui.scopeSelectMode } }));
-  layout.agent.scopeModeToggle.classList.toggle("active", getState().ui.scopeSelectMode);
-  layout.agent.scopeModeToggle.textContent = getState().ui.scopeSelectMode ? "Draw scope: On" : "Draw scope";
-});
-
-layout.agent.scrubRange.addEventListener("input", () => {
-  const idx = Number(layout.agent.scrubRange.value);
-  updateState((s) => ({ ...s, ui: { ...s.ui, scrubMode: true }, agent: { ...s.agent, stepIndex: idx } }));
-  updateScrubber();
-  renderAll();
-});
-layout.agent.scrubBaseBtn.addEventListener("click", () => {
-  updateState((s) => ({ ...s, ui: { ...s.ui, scrubMode: true }, agent: { ...s.agent, stepIndex: 0 } }));
-  layout.agent.scrubRange.value = "0";
-  renderAll();
-});
-layout.agent.scrubLatestBtn.addEventListener("click", () => {
-  const last = Math.max(0, getState().agent.stepSnapshots.length - 1);
-  updateState((s) => ({ ...s, ui: { ...s.ui, scrubMode: true }, agent: { ...s.agent, stepIndex: last } }));
-  layout.agent.scrubRange.value = String(last);
-  renderAll();
-});
-layout.agent.scrubReplayBtn.addEventListener("click", () => replaySteps());
-layout.agent.auditionBtn.addEventListener("click", () => auditionStep());
 
 layout.agent.runBtn.addEventListener("click", () => runAgent());
 layout.agent.stopBtn.addEventListener("click", () => {
   if (!agentAbort) return;
   layout.agent.stopBtn.disabled = true;
-  layout.agent.status.textContent = "Cancelling…";
+  layout.agent.status.textContent = "Cancelling...";
   agentAbort.abort();
 });
-layout.agent.applyBtn.addEventListener("click", () => applyProposal());
-layout.agent.rejectBtn.addEventListener("click", () => rejectProposal());
 layout.agent.undoBtn.addEventListener("click", () => undoLast());
-
-layout.project.trackSearch.addEventListener("input", () => renderTrackList());
 
 const ro = new ResizeObserver(() => {
   resizeCanvases();
@@ -401,15 +215,15 @@ const initProject = (state: ProjectState): void => {
   updateState((s) => ({
     ...s,
     project: { ...s.project, liveState: state, proposal: null },
-    agent: { ...s.agent, stepSnapshots: [], stepIndex: 0, timeline: [] }
+    agent: { ...s.agent, running: false, streamingDraftState: null, stepSnapshots: [], stepIndex: 0, timeline: [] },
+    ui: { ...s.ui, scrubMode: false, previewMode: "draft", scopeRect: null, scopeSelectMode: false }
   }));
   recomputeMaps();
   const first = state.tracks.find((t) => t.notes.length > 0) ?? state.tracks[0] ?? null;
   if (first) setTrackIndex(first.trackIndex);
-  renderTrackList();
+  renderTrackOptions();
+  renderTimeline();
   refreshAgentButtons();
-  updateScrubber();
-  layout.project.playAllTracksToggle.textContent = getState().transport.playAllTracks ? "Play: All" : "Play: Track";
 };
 
 const setTrackIndex = (trackIndex: number): void => {
@@ -420,7 +234,7 @@ const setTrackIndex = (trackIndex: number): void => {
   controller.stop();
   controller.clearSelection();
   controller.setPlayheadTick(0);
-  renderTrackList();
+  renderTrackOptions();
 
   const rollRect = layout.stage.rollWrap.getBoundingClientRect();
   const maxTick = getActiveState()?.maxTick ?? 1;
@@ -428,13 +242,11 @@ const setTrackIndex = (trackIndex: number): void => {
   camera.noteHeightPx = 14;
   camera.scrollTick = 0;
   const range = computePitchRange(track.notes);
-  const pitchMax = range.max;
-  const pitchMin = range.min;
-  camera.topPitch = Math.min(127, pitchMax + 10);
+  camera.topPitch = Math.min(127, range.max + 10);
   camera.clampTo({
     maxTick,
-    pitchMin: Math.max(0, pitchMin - 12),
-    pitchMax: Math.min(127, pitchMax + 12)
+    pitchMin: Math.max(0, range.min - 12),
+    pitchMax: Math.min(127, range.max + 12)
   });
 
   recomputeMaps();
@@ -465,123 +277,43 @@ const renderAll = (): void => {
   const track = getActiveTrack();
   const mm = getState().project.measureMap;
   if (!state || !track || !mm) {
-    clearWithLabel(gridCtx, layout.stage.rollWrap, "Load a .mid/.midi file or start a blank project");
+    clearWithLabel(gridCtx, layout.stage.rollWrap, "Blank piano roll ready");
     notesCtx.clearRect(0, 0, layout.stage.notesCanvas.width, layout.stage.notesCanvas.height);
     overlayCtx.clearRect(0, 0, layout.stage.overlayCanvas.width, layout.stage.overlayCanvas.height);
     clearWithLabel(rulerCtx, layout.stage.rulerWrap, "");
     clearWithLabel(keyboardCtx, layout.stage.keyboardWrap, "");
-    layout.transport.playBtn.disabled = true;
+    layout.controls.playBtn.disabled = true;
     return;
   }
 
   renderRollGrid(gridCtx, camera, mm, theme, getState().ui.gridSubdivision);
-  layout.transport.playBtn.disabled = track.notes.length === 0;
-  layout.project.tempoSummary.textContent = `Tempo: ${state.tempos[0]?.bpm ?? 120} BPM`;
-  const ts = state.timeSignatures[0];
-  layout.project.timeSigSummary.textContent = ts ? `Time: ${ts.numerator}/${ts.denominator}` : "Time: —";
-
-  const p = getState().project.proposal;
-  if (p && getState().ui.previewMode === "draft") {
-    const baseTrack = p.baseState.tracks.find((t) => t.trackIndex === p.scope.trackIndex) ?? null;
-    const draftTrack = p.draftState.tracks.find((t) => t.trackIndex === p.scope.trackIndex) ?? null;
-    const removedNotes: NoteLike[] = [];
-    if (baseTrack && draftTrack) {
-      for (const id of p.diff.removedIds) {
-        const n = baseTrack.notes.find((x) => x.id === id);
-        if (n) removedNotes.push(n);
-      }
-    }
-    renderNotes(notesCtx, camera, getDisplayNotes(), controller.selection, controller.hoverId, theme, {
-      addedIds: p.diff.addedIds,
-      modifiedIds: p.diff.modifiedIds,
-      removedNotes
-    }, getState().ui.noteColorMode);
-  } else {
-    renderNotes(notesCtx, camera, getDisplayNotes(), controller.selection, controller.hoverId, theme, undefined, getState().ui.noteColorMode);
-  }
-  const showOverlays = getState().ui.showOverlays;
-  const scopeRect = getState().ui.scopeRect;
-  const scopeMarquee = showOverlays
-    ? controller.scopeMarquee
-      ? controller.scopeMarquee
-      : scopeRect
-        ? {
-            x: Math.min(camera.tickToX(scopeRect.tickStart), camera.tickToX(scopeRect.tickEnd)),
-            y: Math.min(camera.pitchToY(scopeRect.pitchMax), camera.pitchToY(scopeRect.pitchMin)),
-            w: Math.abs(camera.tickToX(scopeRect.tickEnd) - camera.tickToX(scopeRect.tickStart)),
-            h: Math.abs(camera.pitchToY(scopeRect.pitchMin) - camera.pitchToY(scopeRect.pitchMax))
-          }
-        : null
-    : null;
-  renderOverlay(overlayCtx, camera, controller.playheadTick, showOverlays ? controller.marquee : null, scopeMarquee, theme);
+  layout.controls.playBtn.disabled = track.notes.length === 0;
+  renderNotes(notesCtx, camera, getDisplayNotes(), controller.selection, controller.hoverId, theme, undefined, getState().ui.noteColorMode);
+  renderOverlay(overlayCtx, camera, controller.playheadTick, controller.marquee, null, theme);
   renderRuler(rulerCtx, camera, mm, theme);
   renderKeyboard(keyboardCtx, camera, theme);
-
   renderHud();
-  renderDiffCard();
 };
 
 const renderHud = (): void => {
   const s = getState();
   const mm = s.project.measureMap;
-  const tm = getTempoMapForTransport();
   const tick = s.transport.playheadTick;
   const mbt = mm ? mm.tickToBarBeatTick(tick) : null;
-  const bpm = tm ? bpmAtTick(tm, tick) : null;
-  layout.transport.bpmReadout.textContent = bpm ? `BPM: ${bpm.toFixed(1)}` : "BPM: —";
   if (mbt) {
-    layout.stage.hudReadout.textContent = `Bar ${mbt.bar}:${mbt.beat}:${mbt.tick} • Zoom ${camera.pixelsPerTick.toFixed(
+    const track = getActiveTrack();
+    layout.stage.hudReadout.textContent = `${track?.name ?? "Track"} - Bar ${mbt.bar}:${mbt.beat}:${mbt.tick} - Zoom ${camera.pixelsPerTick.toFixed(
       3
-    )} px/tick`;
+    )}`;
   }
-};
-
-const renderDiffCard = (): void => {
-  const p = getState().project.proposal;
-  if (!p) {
-    layout.stage.diffCard.classList.add("hidden");
-    return;
-  }
-  layout.stage.diffCard.classList.remove("hidden");
-  layout.stage.diffCard.innerHTML = "";
-  const mode = getState().ui.previewMode;
-  const header = document.createElement("div");
-  header.className = "diff-title";
-  header.textContent = `Proposal: +${p.diff.counts.added} −${p.diff.counts.removed} ~${p.diff.counts.modified}`;
-  const summary = document.createElement("div");
-  summary.className = "diff-summary";
-  summary.textContent = `${p.warnings.length ? `${p.warnings.length} warnings • ` : ""}${p.musicalSummary ?? ""}`;
-  const toggle = document.createElement("div");
-  toggle.className = "row";
-  const baseBtn = document.createElement("button");
-  baseBtn.className = `btn ${mode === "base" ? "active" : ""}`;
-  baseBtn.textContent = "View Base";
-  const draftBtn = document.createElement("button");
-  draftBtn.className = `btn ${mode === "draft" ? "active" : ""}`;
-  draftBtn.textContent = "View Draft";
-  baseBtn.addEventListener("click", () => {
-    updateState((s) => ({ ...s, ui: { ...s.ui, previewMode: "base" } }));
-    recomputeMaps();
-    renderAll();
-  });
-  draftBtn.addEventListener("click", () => {
-    updateState((s) => ({ ...s, ui: { ...s.ui, previewMode: "draft" } }));
-    recomputeMaps();
-    renderAll();
-  });
-  toggle.append(baseBtn, draftBtn);
-  layout.stage.diffCard.append(header, summary, toggle);
 };
 
 const updateInspector = (sel: ReadonlySet<string>): void => {
   const selected = [...sel];
-  const count = selected.length;
   const first = selected[0] ? notesById.get(selected[0]) ?? null : null;
   const mm = getState().project.measureMap;
-  const firstText = first
-    ? `${pitchToName(first.pitch)} • start ${formatTick(mm, first.startTick)} • dur ${first.durationTicks} ticks`
-    : "—";
-  layout.stage.hudReadout.textContent = `Selection ${count} • ${firstText}`;
+  const firstText = first ? `${pitchToName(first.pitch)} - start ${formatTick(mm, first.startTick)} - dur ${first.durationTicks} ticks` : "-";
+  layout.stage.hudReadout.textContent = `Selection ${selected.length} - ${firstText}`;
 };
 
 const formatTick = (mm: MeasureMap | null, tick: number): string => {
@@ -590,39 +322,38 @@ const formatTick = (mm: MeasureMap | null, tick: number): string => {
   return `${mbt.bar}:${mbt.beat}:${mbt.tick}`;
 };
 
-const renderTrackList = (): void => {
-  const state = getState();
-  const list = layout.project.trackList;
-  list.innerHTML = "";
-  const live = state.project.liveState;
-  if (!live) return;
-  const query = layout.project.trackSearch.value.trim().toLowerCase();
-  for (const t of live.tracks) {
-    if (query && !t.name.toLowerCase().includes(query)) continue;
-    const row = document.createElement("div");
-    row.className = `track-row ${state.project.selectedTrackIndex === t.trackIndex ? "active" : ""}`;
-    row.textContent = `${t.name} • ${t.notes.length} notes`;
-    row.addEventListener("click", () => setTrackIndex(t.trackIndex));
-    list.append(row);
+const renderTrackOptions = (): void => {
+  const select = layout.controls.trackSelect;
+  const live = getState().project.liveState;
+  select.innerHTML = "";
+  if (!live) {
+    select.disabled = true;
+    return;
   }
+  for (const t of live.tracks) {
+    const option = document.createElement("option");
+    option.value = String(t.trackIndex);
+    option.textContent = `${t.name} (${t.notes.length})`;
+    select.append(option);
+  }
+  select.value = String(getState().project.selectedTrackIndex);
+  select.disabled = live.tracks.length <= 1;
 };
 
 const refreshAgentButtons = (): void => {
   const s = getState();
   const hasLive = Boolean(s.project.liveState);
-  const hasProposal = Boolean(s.project.proposal);
   const running = s.agent.running;
-  layout.agent.runBtn.disabled = running || !hasLive || hasProposal;
+  layout.agent.runBtn.disabled = running || !hasLive;
   layout.agent.stopBtn.disabled = !running;
-  layout.agent.applyBtn.disabled = running || !hasProposal;
-  layout.agent.rejectBtn.disabled = running || !hasProposal;
-  layout.agent.applyBtn.parentElement?.classList.toggle("hidden", !hasProposal);
   layout.agent.undoBtn.disabled = running || undoStack.length === 0;
-  layout.header.exportBtn.disabled = running || !hasLive;
-  layout.agent.stepModeInput.disabled = running || !hasLive || hasProposal;
-  layout.agent.presetSelect.disabled = running;
   layout.agent.promptArea.disabled = running;
-  layout.header.agentStatus.textContent = running ? "Agent: Streaming" : "Agent: Ready";
+  layout.controls.exportBtn.disabled = running || !hasLive;
+  layout.controls.newBtn.disabled = running;
+  layout.controls.fileInput.disabled = running;
+  layout.controls.trackSelect.disabled = running || !hasLive || (s.project.liveState?.tracks.length ?? 0) <= 1;
+  layout.controls.barStartInput.disabled = running || !hasLive;
+  layout.controls.barsInput.disabled = running || !hasLive;
 };
 
 const barToTick = (mm: MeasureMap, bar: number): number => {
@@ -639,15 +370,6 @@ const barToTick = (mm: MeasureMap, bar: number): number => {
   return target * mm.ppq * 4;
 };
 
-const bpmAtTick = (tm: TempoMap, tick: number): number => {
-  const t = Math.max(0, tick);
-  for (let i = tm.segments.length - 1; i >= 0; i--) {
-    const seg = tm.segments[i]!;
-    if (t >= seg.startTick) return seg.bpm;
-  }
-  return tm.segments[0]?.bpm ?? 120;
-};
-
 const startAudioFromTransport = async (): Promise<void> => {
   const s = getState();
   const live = getActiveState();
@@ -655,23 +377,14 @@ const startAudioFromTransport = async (): Promise<void> => {
   const tm = getTempoMapForTransport();
   if (!live || !mm || !tm) return;
 
-  let fromTick = s.transport.playheadTick;
-  if (s.transport.startMode === "bar") {
-    fromTick = barToTick(mm, mm.tickToBarBeatTick(fromTick).bar);
-    controller.setPlayheadTick(fromTick);
-  } else if (s.transport.startMode === "scope" && s.ui.scopeRect) {
-    fromTick = s.ui.scopeRect.tickStart;
-    controller.setPlayheadTick(fromTick);
-  }
-
   await audio.start({
     state: live,
     tempoMap: tm,
     measureMap: mm,
-    fromTick,
-    playAllTracks: s.transport.playAllTracks,
+    fromTick: s.transport.playheadTick,
+    playAllTracks: false,
     selectedTrackIndex: s.project.selectedTrackIndex,
-    metronomeEnabled: s.transport.metronomeEnabled,
+    metronomeEnabled: false,
     volume: s.transport.volume,
     tone: s.transport.tone
   });
@@ -682,125 +395,93 @@ const runAgent = async (): Promise<void> => {
   const liveState = state.project.liveState;
   const measureMap = state.project.measureMap;
   if (!liveState || !measureMap) return;
-  const t = state.project.selectedTrackIndex;
-  const startBar = Number(layout.agent.barStartInput.value || "1");
-  const bars = Number(layout.agent.barsInput.value || "8");
+
+  const trackIndex = state.project.selectedTrackIndex;
+  const startBar = Number(layout.controls.barStartInput.value || "1");
+  const bars = Number(layout.controls.barsInput.value || "8");
   const tickStart = barToTick(measureMap, startBar);
   const tickEnd = barToTick(measureMap, startBar + Math.max(1, bars));
-
-  const pitchMin = layout.agent.pitchMinInput.value ? Number(layout.agent.pitchMinInput.value) : undefined;
-  const pitchMax = layout.agent.pitchMaxInput.value ? Number(layout.agent.pitchMaxInput.value) : undefined;
-  const scope: Scope = state.ui.scopeRect
-    ? {
-        trackIndex: t,
-        tickStart: state.ui.scopeRect.tickStart,
-        tickEnd: state.ui.scopeRect.tickEnd,
-        pitchMin: state.ui.scopeRect.pitchMin,
-        pitchMax: state.ui.scopeRect.pitchMax
-      }
-    : { trackIndex: t, tickStart, tickEnd, pitchMin, pitchMax };
+  const scope: Scope = { trackIndex, tickStart, tickEnd };
 
   agentAbort = new AbortController();
-  const baseTrack = liveState.tracks.find((x) => x.trackIndex === scope.trackIndex);
-  const baseNotes = baseTrack ? baseTrack.notes.map((n) => ({ ...n })) : [];
   updateState((s) => ({
     ...s,
-    agent: {
-      ...s.agent,
-      running: true,
-      streamingDraftState: liveState,
-      timeline: [],
-      stepSnapshots: [{ stepIndex: 0, toolName: "base", notes: baseNotes, at: Date.now() }],
-      stepIndex: 0
-    },
+    agent: { ...s.agent, running: true, streamingDraftState: liveState, timeline: [], stepSnapshots: [], stepIndex: 0 },
     project: { ...s.project, proposal: null },
-    ui: { ...s.ui, scrubMode: false }
+    ui: { ...s.ui, scrubMode: false, previewMode: "draft" }
   }));
-  updateScrubber();
-  layout.agent.status.textContent = "Running agent (streaming)…";
+  layout.agent.status.textContent = "Running agent...";
+  renderTimeline();
   refreshAgentButtons();
+
   try {
-    const p = await runComposerAgent({
-      userPrompt: layout.agent.promptArea.value || "Make a small, tasteful musical improvement inside the scope.",
-      stylePreset: (layout.agent.presetSelect.value === "none" ? undefined : (layout.agent.presetSelect.value as any)) ?? undefined,
+    const proposal = await runComposerAgent({
+      userPrompt: layout.agent.promptArea.value || "Make a small, tasteful musical improvement inside the target bars.",
       scope,
       liveState,
       stream: true,
       signal: agentAbort.signal,
-      stepMode: layout.agent.stepModeInput.checked,
-      stepMaxNotesPerAdd: 3,
-      stepMaxSteps: 64,
-      maxToolCalls: layout.agent.stepModeInput.checked ? 160 : undefined,
+      stepMode: false,
       onStreamEvent: (e) => onStreamEvent(e),
-      onDraftUpdate: ({ draftState, lastTool }) => {
-        if (!lastTool) return;
-        const shouldSnapshot = MUTATING_TOOL_NAMES.has(lastTool.name);
-        updateState((s) => {
-          const track = draftState.tracks.find((x) => x.trackIndex === scope.trackIndex);
-          const notes = track ? track.notes.map((n) => ({ ...n })) : [];
-          const nextStepIndex = shouldSnapshot ? s.agent.stepSnapshots.length : s.agent.stepIndex;
-          return {
-            ...s,
-            agent: {
-              ...s.agent,
-              streamingDraftState: draftState,
-              stepSnapshots: shouldSnapshot
-                ? [...s.agent.stepSnapshots, { stepIndex: nextStepIndex, toolName: lastTool.name, notes, at: Date.now() }]
-                : s.agent.stepSnapshots,
-              stepIndex: nextStepIndex
-            }
-          };
-        });
-        if (shouldSnapshot) updateScrubber();
+      onDraftUpdate: ({ draftState }) => {
+        updateState((s) => ({ ...s, agent: { ...s.agent, streamingDraftState: draftState } }));
         notesById = new Map((draftState.tracks.find((x) => x.trackIndex === scope.trackIndex)?.notes ?? []).map((n) => [n.id, n]));
         recomputeMaps();
         renderAll();
       }
     });
 
-    if ((p.musicalSummary ?? "") === "Cancelled by user.") {
-      updateState((s) => ({ ...s, agent: { ...s.agent, running: false } }));
+    if ((proposal.musicalSummary ?? "") === "Cancelled by user.") {
+      updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
       layout.agent.status.textContent = "Cancelled.";
-      refreshAgentButtons();
+      appendTimeline({ type: "status", message: "Cancelled.", at: Date.now() });
       return;
     }
 
-    const baseTrack = p.baseState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
-    const draftTrack = p.draftState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
+    const baseTrack = proposal.baseState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
+    const draftTrack = proposal.draftState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
     const diff = diffNotes(baseTrack, draftTrack, scope);
-    const res = applyOps(liveState, p.ops, scope);
-    if (res.appliedOps.length > 0 && res.rejectedOps.length === 0) {
-      undoStack.push(res.inverseOps);
+    const result = applyOps(liveState, proposal.ops, scope);
+
+    if (result.appliedOps.length > 0 && result.rejectedOps.length === 0) {
+      undoStack.push(result.inverseOps);
       updateState((s) => ({
         ...s,
-        project: { ...s.project, liveState: res.nextState, proposal: null },
-        agent: { ...s.agent, running: false, streamingDraftState: null },
-        ui: { ...s.ui, scrubMode: false, previewMode: "draft" }
-      }));
-      layout.agent.status.textContent = `Composed: +${diff.counts.added} −${diff.counts.removed} ~${diff.counts.modified}${
-        p.warnings.length ? ` • warnings: ${p.warnings.length}` : ""
-      }${p.musicalSummary ? `\n${p.musicalSummary}` : ""}`;
-    } else {
-      updateState((s) => ({
-        ...s,
-        project: { ...s.project, proposal: { scope, baseState: p.baseState, draftState: p.draftState, ops: p.ops, diff, warnings: p.warnings, musicalSummary: p.musicalSummary } },
+        project: { ...s.project, liveState: result.nextState, proposal: null },
         agent: { ...s.agent, running: false, streamingDraftState: null }
       }));
-      layout.agent.status.textContent = `No composition committed${
-        res.rejectedOps.length ? `: ${res.rejectedOps.map((r) => r.reason).join("; ")}` : ""
-      }${p.musicalSummary ? `\n${p.musicalSummary}` : ""}`;
+      const summary = `Composed: +${diff.counts.added} -${diff.counts.removed} ~${diff.counts.modified}${
+        proposal.warnings.length ? ` - warnings: ${proposal.warnings.length}` : ""
+      }${proposal.musicalSummary ? `\n${proposal.musicalSummary}` : ""}`;
+      layout.agent.status.textContent = summary;
+      appendTimeline({ type: "status", message: "Committed to live MIDI. Use Undo to reverse.", at: Date.now() });
+    } else {
+      const reason = result.rejectedOps.length ? result.rejectedOps.map((r) => r.reason).join("; ") : "agent produced no safe note edits";
+      updateState((s) => ({
+        ...s,
+        project: { ...s.project, proposal: null },
+        agent: { ...s.agent, running: false, streamingDraftState: null }
+      }));
+      layout.agent.status.textContent = `No composition committed: ${reason}${proposal.musicalSummary ? `\n${proposal.musicalSummary}` : ""}`;
+      appendTimeline({ type: "error", message: `No live change: ${reason}`, at: Date.now() });
     }
-    notesById = new Map(draftTrack.notes.map((n) => [n.id, n]));
+
+    notesById = new Map((getActiveTrack()?.notes ?? draftTrack.notes).map((n) => [n.id, n]));
     controller.clearSelection();
+    renderTrackOptions();
     recomputeMaps();
     renderAll();
   } catch (e) {
-    layout.agent.status.textContent = `Failed to run agent: ${String(e)}`;
-  } finally {
     updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
+    layout.agent.status.textContent = `Failed to run agent: ${String(e)}`;
+    appendTimeline({ type: "error", message: String(e), at: Date.now() });
+  } finally {
+    agentAbort = null;
+    updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
+    notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
     refreshAgentButtons();
     renderTimeline();
-    updateScrubber();
+    renderAll();
   }
 };
 
@@ -810,124 +491,35 @@ const onStreamEvent = (e: AgentStreamEvent): void => {
     if (e.type === "status") return { type: "status", message: e.message, at };
     if (e.type === "error") return { type: "error", message: e.message, at };
     if (e.type === "tool_call_started") return { type: "tool_call_started", name: e.tool.name, argsPreview: "", at };
-    if (e.type === "tool_call_delta") return { type: "tool_call_delta", name: e.tool.name, argsPreview: e.tool.argsJsonText.slice(-800), at };
     if (e.type === "tool_call_done") return { type: "tool_call_done", name: e.tool.name, argsPreview: e.tool.argsJsonText.slice(-800), at };
     if (e.type === "tool_applied") return { type: "tool_applied", name: e.tool.name, ok: e.ok, warnings: e.warnings, outputText: e.outputText, at };
     return null;
   })();
-  if (!ev) return;
-  updateState((s) => ({ ...s, agent: { ...s.agent, timeline: [...s.agent.timeline, ev] } }));
+  if (ev) appendTimeline(ev);
+};
+
+const appendTimeline = (event: AgentTimelineEvent): void => {
+  updateState((s) => ({ ...s, agent: { ...s.agent, timeline: [...s.agent.timeline, event] } }));
   renderTimeline();
 };
 
 const renderTimeline = (): void => {
   const list = layout.agent.timeline;
   list.innerHTML = "";
-  for (const e of getState().agent.timeline.slice(-200)) {
+  for (const e of getState().agent.timeline.slice(-120)) {
     const item = document.createElement("div");
     item.className = `timeline-item ${e.type}`;
     if (e.type === "status" || e.type === "error") {
       item.textContent = `${e.type === "error" ? "Error" : "Status"}: ${e.message}`;
     } else if (e.type === "tool_applied") {
-      item.textContent = `${e.ok ? "OK" : "FAIL"} ${e.name}${e.outputText ? ` • ${e.outputText}` : ""}`;
+      item.textContent = `${e.ok ? "Applied" : "Failed"} tool: ${e.name}${e.outputText ? ` - ${e.outputText}` : ""}`;
+      if (e.warnings?.length) item.textContent += ` - ${e.warnings.length} warning${e.warnings.length === 1 ? "" : "s"}`;
     } else {
-      const details = document.createElement("details");
-      const summary = document.createElement("summary");
-      summary.textContent = `${e.type.replace("tool_call_", "tool ")} • ${e.name}`;
-      const pre = document.createElement("pre");
-      pre.textContent = e.argsPreview || "";
-      details.append(summary, pre);
-      item.append(details);
+      item.textContent = `Tool ${e.type === "tool_call_started" ? "started" : "finished"}: ${e.name}`;
     }
     list.append(item);
   }
-};
-
-const updateScrubber = (): void => {
-  const count = getState().agent.stepSnapshots.length;
-  layout.agent.scrubRange.max = String(Math.max(0, count - 1));
-  layout.agent.scrubRange.value = String(getState().agent.stepIndex);
-  layout.agent.scrubLabel.textContent = `Step ${getState().agent.stepIndex}/${Math.max(0, count - 1)}`;
-  layout.agent.scrubRange.disabled = count === 0;
-  layout.agent.scrubReplayBtn.disabled = count <= 1;
-  layout.agent.auditionBtn.disabled = count === 0;
-};
-
-const replaySteps = (): void => {
-  const count = getState().agent.stepSnapshots.length;
-  if (count === 0) return;
-  let i = 0;
-  const timer = window.setInterval(() => {
-    if (i >= count) {
-      window.clearInterval(timer);
-      return;
-    }
-    updateState((s) => ({ ...s, ui: { ...s.ui, scrubMode: true }, agent: { ...s.agent, stepIndex: i } }));
-    layout.agent.scrubRange.value = String(i);
-    updateScrubber();
-    renderAll();
-    i += 1;
-  }, 120);
-};
-
-const auditionStep = async (): Promise<void> => {
-  const s = getState();
-  const live = s.project.liveState;
-  const mm = s.project.measureMap;
-  const tm = getTempoMapForTransport();
-  if (!live || !mm || !tm) return;
-  const snap = s.agent.stepSnapshots[s.agent.stepIndex];
-  if (!snap) return;
-  await audio.start({
-    state: { ...live, tracks: live.tracks.map((t) => (t.trackIndex === s.project.selectedTrackIndex ? { ...t, notes: snap.notes as any } : t)) },
-    tempoMap: tm,
-    measureMap: mm,
-    fromTick: s.transport.playheadTick,
-    playAllTracks: false,
-    selectedTrackIndex: s.project.selectedTrackIndex,
-    metronomeEnabled: s.transport.metronomeEnabled,
-    volume: s.transport.volume,
-    tone: s.transport.tone
-  });
-  setTimeout(() => audio.stop(), 1500);
-};
-
-const applyProposal = (): void => {
-  const s = getState();
-  const liveState = s.project.liveState;
-  const proposal = s.project.proposal;
-  if (!liveState || !proposal) return;
-  const res = applyOps(liveState, proposal.ops, proposal.scope);
-  if (res.appliedOps.length === 0) {
-    layout.agent.status.textContent = `Apply failed: ${res.rejectedOps.map((r) => r.reason).join("; ")}`;
-    return;
-  }
-  updateState((st) => ({
-    ...st,
-    project: { ...st.project, liveState: res.nextState, proposal: null },
-    ui: { ...st.ui, scrubMode: false, previewMode: "draft" }
-  }));
-  undoStack.push(res.inverseOps);
-  recomputeMaps();
-  notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
-  layout.agent.status.textContent = `Applied. Undo stack: ${undoStack.length}`;
-  refreshAgentButtons();
-  updateScrubber();
-  renderAll();
-};
-
-const rejectProposal = (): void => {
-  updateState((s) => ({
-    ...s,
-    project: { ...s.project, proposal: null },
-    ui: { ...s.ui, previewMode: "draft", scrubMode: false }
-  }));
-  recomputeMaps();
-  notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
-  layout.agent.status.textContent = "Rejected proposal.";
-  refreshAgentButtons();
-  updateScrubber();
-  renderAll();
+  list.scrollTop = list.scrollHeight;
 };
 
 const undoLast = (): void => {
@@ -939,11 +531,13 @@ const undoLast = (): void => {
     return;
   }
   const trackIndex = inv[0]?.trackIndex ?? getState().project.selectedTrackIndex;
-  const res = applyOps(liveState, inv, globalScopeForTrack(trackIndex));
-  updateState((s) => ({ ...s, project: { ...s.project, liveState: res.nextState } }));
+  const result = applyOps(liveState, inv, globalScopeForTrack(trackIndex));
+  updateState((s) => ({ ...s, project: { ...s.project, liveState: result.nextState, proposal: null } }));
   recomputeMaps();
   notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
   layout.agent.status.textContent = `Undone. Undo stack: ${undoStack.length}`;
+  appendTimeline({ type: "status", message: "Undid last committed agent run.", at: Date.now() });
+  renderTrackOptions();
   refreshAgentButtons();
   renderAll();
 };
@@ -998,5 +592,6 @@ function readTheme(): RenderTheme {
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
 
 resizeCanvases();
+initProject(createBlankProject());
 renderAll();
 refreshAgentButtons();

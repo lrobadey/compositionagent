@@ -1,24 +1,14 @@
 type LayoutElements = {
   root: HTMLDivElement;
-  header: {
+  controls: {
     fileInput: HTMLInputElement;
+    fileName: HTMLSpanElement;
     newBtn: HTMLButtonElement;
     exportBtn: HTMLButtonElement;
-    gridSelect: HTMLSelectElement;
-    colorSelect: HTMLSelectElement;
-    overlayToggle: HTMLButtonElement;
-    agentStatus: HTMLDivElement;
-    helpBtn: HTMLButtonElement;
-  };
-  project: {
-    trackSearch: HTMLInputElement;
-    trackList: HTMLDivElement;
-    playAllTracksToggle: HTMLButtonElement;
-    tempoSummary: HTMLDivElement;
-    timeSigSummary: HTMLDivElement;
-    scopePresetBar: HTMLButtonElement;
-    scopePresetSelection: HTMLButtonElement;
-    scopePresetVisible: HTMLButtonElement;
+    playBtn: HTMLButtonElement;
+    trackSelect: HTMLSelectElement;
+    barStartInput: HTMLInputElement;
+    barsInput: HTMLInputElement;
   };
   stage: {
     corner: HTMLDivElement;
@@ -32,97 +22,45 @@ type LayoutElements = {
     keyboardCanvas: HTMLCanvasElement;
     hudBar: HTMLDivElement;
     hudReadout: HTMLDivElement;
-    diffCard: HTMLDivElement;
   };
   agent: {
-    presetSelect: HTMLSelectElement;
     promptArea: HTMLTextAreaElement;
-    stepModeInput: HTMLInputElement;
-    scopeModeToggle: HTMLButtonElement;
-    barStartInput: HTMLInputElement;
-    barsInput: HTMLInputElement;
-    pitchMinInput: HTMLInputElement;
-    pitchMaxInput: HTMLInputElement;
     runBtn: HTMLButtonElement;
     stopBtn: HTMLButtonElement;
-    applyBtn: HTMLButtonElement;
-    rejectBtn: HTMLButtonElement;
     undoBtn: HTMLButtonElement;
     status: HTMLDivElement;
     timeline: HTMLDivElement;
-    scrubRange: HTMLInputElement;
-    scrubLabel: HTMLDivElement;
-    scrubBaseBtn: HTMLButtonElement;
-    scrubLatestBtn: HTMLButtonElement;
-    scrubReplayBtn: HTMLButtonElement;
-    auditionBtn: HTMLButtonElement;
-  };
-  transport: {
-    playBtn: HTMLButtonElement;
-    loopToggle: HTMLButtonElement;
-    metronomeToggle: HTMLButtonElement;
-    bpmReadout: HTMLDivElement;
-    tempoOverrideToggle: HTMLInputElement;
-    tempoOverrideInput: HTMLInputElement;
-    volumeInput: HTMLInputElement;
-    toneSelect: HTMLSelectElement;
-    startModeSelect: HTMLSelectElement;
-    loopModeSelect: HTMLSelectElement;
-  };
-  modal: {
-    shortcuts: HTMLDivElement;
-    shortcutsClose: HTMLButtonElement;
   };
 };
 
 export const createLayout = (): LayoutElements => {
   const root = el("div", { className: "app-shell" });
+  const workspace = el("div", { className: "workspace" });
 
-  const header = el("div", { className: "header-bar" });
-  const headerLeft = el("div", { className: "header-group" });
-  const headerCenter = el("div", { className: "header-group center" });
-  const headerRight = el("div", { className: "header-group" });
-
-  const fileInput = el("input", { type: "file", className: "file-input" }) as HTMLInputElement;
+  const rollPane = el("main", { className: "roll-pane" });
+  const controls = el("div", { className: "control-strip" });
+  const fileInput = el("input", { type: "file", className: "file-input", title: "Load MIDI" }) as HTMLInputElement;
   fileInput.accept = ".mid,.midi";
-  const newBtn = button("New Blank");
-  const exportBtn = button("Export MIDI");
-  const gridSelect = select([
-    ["4", "Grid 1/4"],
-    ["8", "Grid 1/8"],
-    ["16", "Grid 1/16"]
-  ]);
-  const colorSelect = select([
-    ["default", "Color: default"],
-    ["velocity", "Color: velocity"],
-    ["track", "Color: track"]
-  ]);
-  const overlayToggle = button("Overlays");
-  const agentStatus = el("div", { className: "status-pill", textContent: "Agent: Ready" });
-  const helpBtn = button("Shortcuts");
+  const fileLabel = el("label", { className: "btn file-label" }) as HTMLLabelElement;
+  fileLabel.append("Load MIDI", fileInput);
+  const fileName = el("span", { className: "file-name", textContent: "Blank" }) as HTMLSpanElement;
+  const newBtn = button("New");
+  const exportBtn = button("Export");
+  const playBtn = button("Play");
+  const trackSelect = select([], "Track");
+  const barStartInput = el("input", { type: "number", value: "1", min: "1", className: "input compact", title: "Start bar" }) as HTMLInputElement;
+  const barsInput = el("input", { type: "number", value: "8", min: "1", className: "input compact", title: "Bars" }) as HTMLInputElement;
 
-  headerLeft.append(fileInput, newBtn, exportBtn);
-  headerCenter.append(gridSelect, colorSelect, overlayToggle);
-  headerRight.append(agentStatus, helpBtn);
-  header.append(headerLeft, headerCenter, headerRight);
-
-  const body = el("div", { className: "body-grid" });
-
-  const projectBay = el("div", { className: "panel project-bay" });
-  const projectTitle = el("div", { className: "panel-title", textContent: "Project" });
-  const projectMeta = el("div", { className: "panel-note", textContent: "Track, timing, and scope context." });
-  const trackSearch = el("input", { className: "input", placeholder: "Search tracks..." }) as HTMLInputElement;
-  const trackList = el("div", { className: "track-list" });
-  const playAllTracksToggle = button("Play: Track");
-  const tempoSummary = el("div", { className: "meta-row", textContent: "Tempo: —" });
-  const timeSigSummary = el("div", { className: "meta-row", textContent: "Time: —" });
-  const scopeTitle = el("div", { className: "section-title", textContent: "Scope" });
-  const scopePresetBar = button("Bars 1-8");
-  const scopePresetSelection = button("Use selection");
-  const scopePresetVisible = button("Use visible range");
-  const presetRow = el("div", { className: "row" });
-  presetRow.append(scopePresetBar, scopePresetSelection, scopePresetVisible);
-  projectBay.append(projectTitle, projectMeta, trackSearch, trackList, playAllTracksToggle, tempoSummary, timeSigSummary, scopeTitle, presetRow);
+  controls.append(
+    fileLabel,
+    fileName,
+    newBtn,
+    exportBtn,
+    playBtn,
+    trackSelect,
+    labelWrap("Start", barStartInput),
+    labelWrap("Bars", barsInput)
+  );
 
   const stage = el("div", { className: "stage" });
   const stageFrame = el("div", { className: "stage-frame" });
@@ -139,182 +77,41 @@ export const createLayout = (): LayoutElements => {
   rulerWrap.append(rulerCanvas);
   keyboardWrap.append(keyboardCanvas);
   rollWrap.append(gridCanvas, notesCanvas, overlayCanvas);
-
   stageFrame.append(corner, rulerWrap, keyboardWrap, rollWrap);
 
   const hudBar = el("div", { className: "hud-bar" });
-  const hudReadout = el("div", { className: "hud-readout", textContent: "Ready" });
-  const diffCard = el("div", { className: "diff-card hidden" });
+  const hudReadout = el("div", { className: "hud-readout", textContent: "Blank piano roll ready" });
   hudBar.append(hudReadout);
+  stage.append(stageFrame, hudBar);
+  rollPane.append(controls, stage);
 
-  stage.append(stageFrame, hudBar, diffCard);
-
-  const agent = el("div", { className: "panel agent-console" });
-  const agentHeader = el("div", { className: "composer-header" });
-  const agentTitleGroup = el("div", { className: "title-stack" });
-  const agentTitle = el("div", { className: "panel-title", textContent: "Composer" });
-  const agentSubtitle = el("div", { className: "panel-note", textContent: "Compose directly into the MIDI. Undo reverses the last run." });
-  agentTitleGroup.append(agentTitle, agentSubtitle);
-  const presetSelect = select([
-    ["none", "Preset: none"],
-    ["counter_melody", "Preset: counter-melody"],
-    ["tighten_rhythm", "Preset: tighten rhythm"],
-    ["tension_resolve", "Preset: tension -> resolve"]
-  ]);
-  agentHeader.append(agentTitleGroup, presetSelect);
-  const promptArea = el("textarea", { className: "textarea composer-prompt", placeholder: "Describe what to compose or change..." }) as HTMLTextAreaElement;
-  const stepModeInput = el("input", { type: "checkbox" }) as HTMLInputElement;
-  const stepModeLabel = el("label", { className: "checkbox" });
-  stepModeLabel.append(stepModeInput, document.createTextNode(" Step mode"));
-  const scopeModeToggle = button("Draw scope");
-
-  const barStartInput = el("input", { type: "number", value: "1", min: "1", className: "input" }) as HTMLInputElement;
-  const barsInput = el("input", { type: "number", value: "8", min: "1", className: "input" }) as HTMLInputElement;
-  const pitchMinInput = el("input", { type: "number", placeholder: "Pitch min", className: "input" }) as HTMLInputElement;
-  const pitchMaxInput = el("input", { type: "number", placeholder: "Pitch max", className: "input" }) as HTMLInputElement;
-
+  const agent = el("aside", { className: "agent-rail" });
+  const promptBox = el("section", { className: "prompt-box" });
+  const promptTitle = el("div", { className: "rail-title", textContent: "Prompt" });
+  const promptArea = el("textarea", { className: "textarea composer-prompt", placeholder: "Tell the agent what to write or change..." }) as HTMLTextAreaElement;
   const runBtn = button("Compose");
   const stopBtn = button("Stop");
-  const applyBtn = button("Apply");
-  const rejectBtn = button("Reject");
   const undoBtn = button("Undo");
   runBtn.classList.add("primary");
-  const status = el("div", { className: "status-box", textContent: "Load a MIDI file or click New Blank to begin." });
+  const actionRow = el("div", { className: "action-row" });
+  actionRow.append(runBtn, stopBtn, undoBtn);
+  const status = el("div", { className: "status-box", textContent: "Ready." });
+  promptBox.append(promptTitle, promptArea, actionRow, status);
+
+  const traceBox = el("section", { className: "trace-box" });
+  const traceTitle = el("div", { className: "rail-title", textContent: "Agent trace" });
   const timeline = el("div", { className: "timeline" });
+  traceBox.append(traceTitle, timeline);
+  agent.append(promptBox, traceBox);
 
-  const scrubRange = el("input", { type: "range", min: "0", max: "0", value: "0", className: "range" }) as HTMLInputElement;
-  const scrubLabel = el("div", { className: "meta-row", textContent: "Step 0/0" });
-  const scrubBaseBtn = button("View Base");
-  const scrubLatestBtn = button("View Latest");
-  const scrubReplayBtn = button("Replay Steps");
-  const auditionBtn = button("Audition Step");
-  const scrubRow = el("div", { className: "row" });
-  scrubRow.append(scrubBaseBtn, scrubLatestBtn, scrubReplayBtn, auditionBtn);
-
-  const composeActions = row(runBtn, stopBtn, undoBtn);
-  composeActions.classList.add("action-row");
-  const fallbackActions = row(applyBtn, rejectBtn);
-  fallbackActions.classList.add("fallback-actions", "hidden");
-  const rangePanel = el("div", { className: "composer-range" });
-  rangePanel.append(
-    el("div", { className: "section-title", textContent: "Composition range" }),
-    gridRow("Start bar", barStartInput, "Bars", barsInput),
-    gridRow("Pitch min", pitchMinInput, "Pitch max", pitchMaxInput),
-    row(scopeModeToggle, stepModeLabel)
-  );
-  const activityHeader = el("div", { className: "panel-title small", textContent: "Live activity" });
-  const scrubberPanel = el("div", { className: "scrubber-panel" });
-  scrubberPanel.append(el("div", { className: "section-title", textContent: "Step scrubber" }), scrubLabel, scrubRange, scrubRow);
-
-  agent.append(
-    agentHeader,
-    promptArea,
-    rangePanel,
-    composeActions,
-    fallbackActions,
-    status,
-    activityHeader,
-    timeline,
-    scrubberPanel
-  );
-
-  const transport = el("div", { className: "transport-dock" });
-  const playBtn = button("Play");
-  const loopToggle = button("Loop");
-  const metronomeToggle = button("Metronome");
-  const bpmReadout = el("div", { className: "meta-row", textContent: "BPM: —" });
-  const tempoOverrideToggle = el("input", { type: "checkbox" }) as HTMLInputElement;
-  const tempoOverrideLabel = el("label", { className: "checkbox" });
-  tempoOverrideLabel.append(tempoOverrideToggle, document.createTextNode(" Tempo override"));
-  const tempoOverrideInput = el("input", { type: "number", value: "120", min: "20", max: "300", className: "input" }) as HTMLInputElement;
-  const volumeInput = el("input", { type: "range", min: "0", max: "1", step: "0.01", value: "0.6", className: "range" }) as HTMLInputElement;
-  const toneSelect = select([
-    ["triangle", "Tone: Triangle"],
-    ["sawtooth", "Tone: Saw"]
-  ]);
-  const startModeSelect = select([
-    ["playhead", "Start: Playhead"],
-    ["bar", "Start: Bar"],
-    ["scope", "Start: Scope"]
-  ]);
-  const loopModeSelect = select([
-    ["scope", "Loop: Scope"],
-    ["selection", "Loop: Selection"]
-  ]);
-
-  transport.append(
-    playBtn,
-    loopToggle,
-    metronomeToggle,
-    bpmReadout,
-    tempoOverrideLabel,
-    tempoOverrideInput,
-    toneSelect,
-    startModeSelect,
-    loopModeSelect,
-    el("div", { className: "meta-row", textContent: "Volume" }),
-    volumeInput
-  );
-
-  body.append(projectBay, stage, agent);
-
-  const shortcuts = el("div", { className: "modal hidden" });
-  const modalCard = el("div", { className: "modal-card" });
-  const shortcutsClose = button("Close");
-  modalCard.append(
-    el("div", { className: "panel-title", textContent: "Shortcuts" }),
-    el("div", {
-      className: "modal-body",
-      textContent:
-        "Wheel: vertical scroll • Shift+wheel: horizontal • Ctrl/Cmd+wheel: zoom X • Alt+wheel: zoom Y\nSpace: play/stop • Home/End: jump playhead • Drag in scope mode: set scope"
-    }),
-    shortcutsClose
-  );
-  shortcuts.append(modalCard);
-
-  root.append(header, body, transport, shortcuts);
+  workspace.append(rollPane, agent);
+  root.append(workspace);
 
   return {
     root,
-    header: { fileInput, newBtn, exportBtn, gridSelect: gridSelect as HTMLSelectElement, colorSelect: colorSelect as HTMLSelectElement, overlayToggle, agentStatus, helpBtn },
-    project: { trackSearch, trackList, playAllTracksToggle, tempoSummary, timeSigSummary, scopePresetBar, scopePresetSelection, scopePresetVisible },
-    stage: { corner, rulerWrap, keyboardWrap, rollWrap, rulerCanvas, gridCanvas, notesCanvas, overlayCanvas, keyboardCanvas, hudBar, hudReadout, diffCard },
-    agent: {
-      presetSelect: presetSelect as HTMLSelectElement,
-      promptArea,
-      stepModeInput,
-      scopeModeToggle,
-      barStartInput,
-      barsInput,
-      pitchMinInput,
-      pitchMaxInput,
-      runBtn,
-      stopBtn,
-      applyBtn,
-      rejectBtn,
-      undoBtn,
-      status,
-      timeline,
-      scrubRange,
-      scrubLabel,
-      scrubBaseBtn,
-      scrubLatestBtn,
-      scrubReplayBtn,
-      auditionBtn
-    },
-    transport: {
-      playBtn,
-      loopToggle,
-      metronomeToggle,
-      bpmReadout,
-      tempoOverrideToggle,
-      tempoOverrideInput,
-      volumeInput,
-      toneSelect: toneSelect as HTMLSelectElement,
-      startModeSelect: startModeSelect as HTMLSelectElement,
-      loopModeSelect: loopModeSelect as HTMLSelectElement
-    },
-    modal: { shortcuts, shortcutsClose }
+    controls: { fileInput, fileName, newBtn, exportBtn, playBtn, trackSelect, barStartInput, barsInput },
+    stage: { corner, rulerWrap, keyboardWrap, rollWrap, rulerCanvas, gridCanvas, notesCanvas, overlayCanvas, keyboardCanvas, hudBar, hudReadout },
+    agent: { promptArea, runBtn, stopBtn, undoBtn, status, timeline }
   };
 };
 
@@ -326,32 +123,21 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 
 const button = (label: string): HTMLButtonElement => el("button", { className: "btn", textContent: label }) as HTMLButtonElement;
 
-const select = (opts: [string, string][]): HTMLSelectElement => {
-  const s = el("select", { className: "select" }) as HTMLSelectElement;
-  for (const [value, label] of opts) {
+const select = (opts: [string, string][], label: string): HTMLSelectElement => {
+  const s = el("select", { className: "select", title: label }) as HTMLSelectElement;
+  for (const [value, text] of opts) {
     const o = document.createElement("option");
     o.value = value;
-    o.textContent = label;
+    o.textContent = text;
     s.append(o);
   }
   return s;
 };
 
-const row = (...children: HTMLElement[]): HTMLDivElement => {
-  const r = el("div", { className: "row" }) as HTMLDivElement;
-  r.append(...children);
-  return r;
-};
-
-const gridRow = (labelA: string, inputA: HTMLElement, labelB: string, inputB: HTMLElement): HTMLDivElement => {
-  const g = el("div", { className: "grid-row" }) as HTMLDivElement;
-  g.append(
-    el("div", { className: "label", textContent: labelA }),
-    inputA,
-    el("div", { className: "label", textContent: labelB }),
-    inputB
-  );
-  return g;
+const labelWrap = (label: string, child: HTMLElement): HTMLLabelElement => {
+  const wrap = el("label", { className: "compact-field" }) as HTMLLabelElement;
+  wrap.append(el("span", { textContent: label }), child);
+  return wrap;
 };
 
 const canvas = (kind: string): HTMLCanvasElement => el("canvas", { className: `canvas ${kind}` }) as HTMLCanvasElement;

@@ -4,6 +4,7 @@ Thumbs.db
 
 # Codex / workspace metadata
 .codex/
+.playwright-mcp/
 
 # Node / Vite dependencies and build output
 **/node_modules/
