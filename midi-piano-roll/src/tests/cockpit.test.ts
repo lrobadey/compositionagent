@@ -14,42 +14,46 @@ const toolEvent = (type: Extract<AgentTimelineEvent["type"], "tool_call_started"
 };
 
 describe("composer cockpit", () => {
-  it("keeps tool chatter out of the live cockpit and refreshes summary on thinking", () => {
+  it("renders tool milestones live while keeping deltas and thinking separate", () => {
     const renderThinkingPanel = vi.fn();
     const renderActionTimeline = vi.fn();
     const cockpit = createComposerCockpit({ renderThinkingPanel, renderActionTimeline });
 
-    cockpit.append(toolEvent("tool_call_started"));
-    cockpit.append(toolEvent("tool_call_delta"));
-    cockpit.append(toolEvent("tool_call_done"));
-    cockpit.append(toolEvent("tool_applied"));
+    const started = toolEvent("tool_call_started");
+    const delta = toolEvent("tool_call_delta");
+    const done = toolEvent("tool_call_done");
+    const applied = toolEvent("tool_applied");
 
+    cockpit.append(started);
     expect(renderThinkingPanel).not.toHaveBeenCalled();
-    expect(renderActionTimeline).not.toHaveBeenCalled();
+    expect(renderActionTimeline).toHaveBeenCalledTimes(1);
+    expect(renderActionTimeline).toHaveBeenLastCalledWith([started]);
+
+    cockpit.append(delta);
+    expect(renderThinkingPanel).not.toHaveBeenCalled();
+    expect(renderActionTimeline).toHaveBeenCalledTimes(1);
+
+    cockpit.append(done);
+    expect(renderThinkingPanel).not.toHaveBeenCalled();
+    expect(renderActionTimeline).toHaveBeenCalledTimes(2);
+    expect(renderActionTimeline).toHaveBeenLastCalledWith([started, delta, done]);
+
+    cockpit.append(applied);
+    expect(renderThinkingPanel).not.toHaveBeenCalled();
+    expect(renderActionTimeline).toHaveBeenCalledTimes(3);
+    expect(renderActionTimeline).toHaveBeenLastCalledWith([started, delta, done, applied]);
 
     const thinkingEvent: AgentTimelineEvent = { type: "thinking", text: "thinking summary", at: 2 };
     cockpit.append(thinkingEvent);
 
     expect(renderThinkingPanel).toHaveBeenCalledTimes(1);
-    expect(renderThinkingPanel).toHaveBeenCalledWith([
-      toolEvent("tool_call_started"),
-      toolEvent("tool_call_delta"),
-      toolEvent("tool_call_done"),
-      toolEvent("tool_applied"),
-      thinkingEvent
-    ]);
-    expect(renderActionTimeline).not.toHaveBeenCalled();
+    expect(renderThinkingPanel).toHaveBeenCalledWith([started, delta, done, applied, thinkingEvent]);
+    expect(renderActionTimeline).toHaveBeenCalledTimes(3);
 
     cockpit.flushFinalView();
 
     expect(renderThinkingPanel).toHaveBeenCalledTimes(2);
-    expect(renderActionTimeline).toHaveBeenCalledTimes(1);
-    expect(renderActionTimeline).toHaveBeenCalledWith([
-      toolEvent("tool_call_started"),
-      toolEvent("tool_call_delta"),
-      toolEvent("tool_call_done"),
-      toolEvent("tool_applied"),
-      thinkingEvent
-    ]);
+    expect(renderActionTimeline).toHaveBeenCalledTimes(4);
+    expect(renderActionTimeline).toHaveBeenLastCalledWith([started, delta, done, applied, thinkingEvent]);
   });
 });

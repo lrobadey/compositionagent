@@ -18,9 +18,10 @@ export const createComposerCockpit = (renderers: ComposerCockpitRenderers): Comp
   const append = (event: AgentTimelineEvent): void => {
     events = [...events, event];
 
-    // Keep the cockpit quiet during tool churn; only live-repaint the summary panel.
     if (event.type === "thinking") {
       renderers.renderThinkingPanel(events);
+    } else if (event.type === "tool_call_started" || event.type === "tool_call_done" || event.type === "tool_applied") {
+      renderers.renderActionTimeline(events);
     }
   };
 
