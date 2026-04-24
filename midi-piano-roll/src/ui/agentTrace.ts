@@ -1,3 +1,5 @@
+import type { AgentTimelineEvent } from "../app/store";
+
 const TOOL_LABELS: Record<string, string> = {
   place_note: "Add notes",
   add_notes: "Add notes",
@@ -57,4 +59,16 @@ export const parseThinkingText = (text: string): ParsedThinkingText => {
     headline: match[1]?.trim() || null,
     body: (match[2] ?? "").trim()
   };
+};
+
+export const thinkingPanelRenderKey = (events: AgentTimelineEvent[]): string => {
+  const latestSummary = [...events].reverse().find((e) => e.type === "thinking");
+  const latestThought = [...events]
+    .reverse()
+    .find((e) => e.type === "tool_applied" && e.name === "composer_thought" && e.outputText);
+
+  return JSON.stringify({
+    summary: latestSummary?.type === "thinking" ? latestSummary.text : null,
+    thought: latestThought?.type === "tool_applied" ? latestThought.outputText ?? null : null
+  });
 };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { parseThinkingText, readableToolLabel, toolActionText } from "../ui/agentTrace";
+import { parseThinkingText, readableToolLabel, thinkingPanelRenderKey, toolActionText } from "../ui/agentTrace";
+import type { AgentTimelineEvent } from "../app/store";
 
 describe("agent trace labels", () => {
   it("maps internal composer tool names to natural visible labels", () => {
@@ -41,5 +42,27 @@ describe("thinking text parsing", () => {
       headline: null,
       body: "I am **noticing contrast** in the middle."
     });
+  });
+});
+
+describe("thinking panel render key", () => {
+  it("stays stable when the visible thinking text has not changed", () => {
+    const first: AgentTimelineEvent[] = [{ type: "thinking", text: "**Shaping the phrase**\n\nMoving upward.", at: 1 }];
+    const repeated: AgentTimelineEvent[] = [
+      ...first,
+      { type: "status", message: "Tool churn that is not shown in the panel.", at: 2 }
+    ];
+
+    expect(thinkingPanelRenderKey(repeated)).toBe(thinkingPanelRenderKey(first));
+  });
+
+  it("changes when the visible thinking text changes", () => {
+    const first: AgentTimelineEvent[] = [{ type: "thinking", text: "**Shaping the phrase**\n\nMoving upward.", at: 1 }];
+    const changed: AgentTimelineEvent[] = [
+      ...first,
+      { type: "thinking", text: "**Resolving the cadence**\n\nLanding lower.", at: 2 }
+    ];
+
+    expect(thinkingPanelRenderKey(changed)).not.toBe(thinkingPanelRenderKey(first));
   });
 });

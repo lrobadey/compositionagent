@@ -21,7 +21,7 @@ import {
   type RenderTheme,
   type NoteLike
 } from "./lib/view/render";
-import { parseThinkingText, toolActionText } from "./ui/agentTrace";
+import { parseThinkingText, thinkingPanelRenderKey, toolActionText } from "./ui/agentTrace";
 import { createComposerCockpit } from "./ui/cockpit";
 import { createLayout } from "./ui/layout";
 import { getState, updateState } from "./app/store";
@@ -49,6 +49,7 @@ let agentAbort: AbortController | null = null;
 let lastPlayheadTick = 0;
 const undoStack: import("./lib/compose/ops").ComposeOp[][] = [];
 let composerCockpit: ReturnType<typeof createComposerCockpit>;
+let lastThinkingPanelRenderKey = "";
 
 const defaultPitchRange = (): { min: number; max: number } => ({ min: 48, max: 84 });
 const computePitchRange = (notes: Note[]): { min: number; max: number } => {
@@ -540,12 +541,16 @@ const renderActionTimeline = (): void => {
 
 const renderThinkingPanel = (events: AgentTimelineEvent[]): void => {
   const panel = layout.agent.thinkingPanel;
-  panel.innerHTML = "";
+  const renderKey = thinkingPanelRenderKey(events);
+  if (renderKey === lastThinkingPanelRenderKey) return;
+  lastThinkingPanelRenderKey = renderKey;
 
   const latestSummary = [...events].reverse().find((e) => e.type === "thinking");
   const latestThought = [...events]
     .reverse()
     .find((e) => e.type === "tool_applied" && e.name === "composer_thought" && e.outputText);
+
+  panel.innerHTML = "";
 
   if (!latestSummary && !latestThought) {
     const empty = document.createElement("div");
