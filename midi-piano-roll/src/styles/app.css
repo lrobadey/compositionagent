@@ -277,13 +277,35 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  animation: thinking-block-in 220ms ease-out;
 }
 
-.thinking-label {
+.thinking-source {
   color: var(--accent-strong);
   font-size: 11px;
   font-weight: 750;
   line-height: 1.2;
+}
+
+.thinking-headline {
+  animation: thinking-headline-shine 2.8s ease-in-out infinite;
+  background: linear-gradient(100deg, var(--text) 0%, var(--text) 32%, var(--accent-strong) 48%, var(--text) 64%, var(--text) 100%);
+  background-size: 240% 100%;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 780;
+  line-height: 1.2;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.thinking-body {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .thinking-copy {
@@ -292,6 +314,41 @@ textarea {
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+@keyframes thinking-block-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes thinking-headline-shine {
+  0% {
+    background-position: 120% 50%;
+  }
+
+  55%,
+  100% {
+    background-position: -120% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block,
+  .thinking-headline {
+    animation: none;
+  }
+
+  .thinking-headline {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
 }
 
 .timeline {

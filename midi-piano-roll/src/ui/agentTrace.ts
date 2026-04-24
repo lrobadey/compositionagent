@@ -42,3 +42,19 @@ export const toolActionText = (
   if (phase === "failed") return `Could not complete: ${label}${detail ? ` - ${detail}` : ""}`;
   return `${label}${detail ? ` - ${detail}` : ""}`;
 };
+
+export type ParsedThinkingText = {
+  headline: string | null;
+  body: string;
+};
+
+export const parseThinkingText = (text: string): ParsedThinkingText => {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^\*\*([^*\n][^\n]*?)\*\*(?:\s*\n+|\s+)?([\s\S]*)$/);
+  if (!match) return { headline: null, body: trimmed };
+
+  return {
+    headline: match[1]?.trim() || null,
+    body: (match[2] ?? "").trim()
+  };
+};

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readableToolLabel, toolActionText } from "../ui/agentTrace";
+import { parseThinkingText, readableToolLabel, toolActionText } from "../ui/agentTrace";
 
 describe("agent trace labels", () => {
   it("maps internal composer tool names to natural visible labels", () => {
@@ -18,5 +18,28 @@ describe("agent trace labels", () => {
 
   it("humanizes unknown tool names instead of rendering raw identifiers", () => {
     expect(readableToolLabel("shape_phrase_curve")).toBe("Shape Phrase Curve");
+  });
+});
+
+describe("thinking text parsing", () => {
+  it("extracts a leading bold thinking headline", () => {
+    expect(parseThinkingText("**Defining musical forms**\n\nI am shaping the row.")).toEqual({
+      headline: "Defining musical forms",
+      body: "I am shaping the row."
+    });
+  });
+
+  it("leaves plain thinking text as body copy", () => {
+    expect(parseThinkingText("I am shaping the row.")).toEqual({
+      headline: null,
+      body: "I am shaping the row."
+    });
+  });
+
+  it("does not promote later bold text into a headline", () => {
+    expect(parseThinkingText("I am **noticing contrast** in the middle.")).toEqual({
+      headline: null,
+      body: "I am **noticing contrast** in the middle."
+    });
   });
 });

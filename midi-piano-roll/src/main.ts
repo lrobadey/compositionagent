@@ -21,7 +21,7 @@ import {
   type RenderTheme,
   type NoteLike
 } from "./lib/view/render";
-import { toolActionText } from "./ui/agentTrace";
+import { parseThinkingText, toolActionText } from "./ui/agentTrace";
 import { createLayout } from "./ui/layout";
 import { getState, updateState } from "./app/store";
 import type { AgentTimelineEvent } from "./app/store";
@@ -558,17 +558,29 @@ const renderThinkingPanel = (events: AgentTimelineEvent[]): void => {
 };
 
 const thinkingBlock = (label: string, text: string): HTMLDivElement => {
+  const parsed = parseThinkingText(text);
   const block = document.createElement("div");
   block.className = "thinking-block";
-  const title = document.createElement("div");
-  title.className = "thinking-label";
-  title.textContent = label;
-  const copy = document.createElement("div");
-  copy.className = "thinking-copy";
-  copy.textContent = text.length > 700 ? `${text.slice(0, 700)}...` : text;
-  block.append(title, copy);
+  const source = document.createElement("div");
+  source.className = "thinking-source";
+  source.textContent = label;
+  block.append(source);
+
+  if (parsed.headline) {
+    const headline = document.createElement("div");
+    headline.className = "thinking-headline";
+    headline.textContent = parsed.headline;
+    block.append(headline);
+  }
+
+  const body = document.createElement("div");
+  body.className = parsed.headline ? "thinking-body" : "thinking-copy";
+  body.textContent = clipThinkingText(parsed.body);
+  block.append(body);
   return block;
 };
+
+const clipThinkingText = (text: string): string => (text.length > 700 ? `${text.slice(0, 700)}...` : text);
 
 const undoLast = (): void => {
   const liveState = getState().project.liveState;
