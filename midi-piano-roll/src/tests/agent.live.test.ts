@@ -27,8 +27,8 @@ describe.runIf(LIVE)("agent (live)", () => {
 
     const proposal = await runComposerAgent({
       userPrompt: [
-        "Within the scope, add a simple 1-bar C-major arpeggio starting at tickStart.",
-        "Use add_notes (or arpeggiate macro) and then finalize_proposal.",
+        "Within the scope, compose a simple 1-bar C-major arpeggio starting at bar 1 beat 1.",
+        "Use place_note in small 1-3 note batches, review_notes, and finalize_composition_run.",
         "Keep it sparse (no more than ~16 notes)."
       ].join("\n"),
       scope: { trackIndex: 0, tickStart: 0, tickEnd: barTicks },

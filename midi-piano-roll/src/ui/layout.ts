@@ -109,19 +109,20 @@ export const createLayout = (): LayoutElements => {
   const body = el("div", { className: "body-grid" });
 
   const projectBay = el("div", { className: "panel project-bay" });
-  const projectTitle = el("div", { className: "panel-title", textContent: "Project Bay" });
-  const trackSearch = el("input", { className: "input", placeholder: "Search tracks…" }) as HTMLInputElement;
+  const projectTitle = el("div", { className: "panel-title", textContent: "Project" });
+  const projectMeta = el("div", { className: "panel-note", textContent: "Track, timing, and scope context." });
+  const trackSearch = el("input", { className: "input", placeholder: "Search tracks..." }) as HTMLInputElement;
   const trackList = el("div", { className: "track-list" });
   const playAllTracksToggle = button("Play: Track");
   const tempoSummary = el("div", { className: "meta-row", textContent: "Tempo: —" });
   const timeSigSummary = el("div", { className: "meta-row", textContent: "Time: —" });
-  const scopeTitle = el("div", { className: "section-title", textContent: "Scope Presets" });
-  const scopePresetBar = button("Bars 1–4");
-  const scopePresetSelection = button("Selection");
-  const scopePresetVisible = button("Visible");
+  const scopeTitle = el("div", { className: "section-title", textContent: "Scope" });
+  const scopePresetBar = button("Bars 1-8");
+  const scopePresetSelection = button("Use selection");
+  const scopePresetVisible = button("Use visible range");
   const presetRow = el("div", { className: "row" });
   presetRow.append(scopePresetBar, scopePresetSelection, scopePresetVisible);
-  projectBay.append(projectTitle, trackSearch, trackList, playAllTracksToggle, tempoSummary, timeSigSummary, scopeTitle, presetRow);
+  projectBay.append(projectTitle, projectMeta, trackSearch, trackList, playAllTracksToggle, tempoSummary, timeSigSummary, scopeTitle, presetRow);
 
   const stage = el("div", { className: "stage" });
   const stageFrame = el("div", { className: "stage-frame" });
@@ -149,29 +150,35 @@ export const createLayout = (): LayoutElements => {
   stage.append(stageFrame, hudBar, diffCard);
 
   const agent = el("div", { className: "panel agent-console" });
-  const agentTitle = el("div", { className: "panel-title", textContent: "Agent Console" });
+  const agentHeader = el("div", { className: "composer-header" });
+  const agentTitleGroup = el("div", { className: "title-stack" });
+  const agentTitle = el("div", { className: "panel-title", textContent: "Composer" });
+  const agentSubtitle = el("div", { className: "panel-note", textContent: "Compose directly into the MIDI. Undo reverses the last run." });
+  agentTitleGroup.append(agentTitle, agentSubtitle);
   const presetSelect = select([
     ["none", "Preset: none"],
     ["counter_melody", "Preset: counter-melody"],
     ["tighten_rhythm", "Preset: tighten rhythm"],
-    ["tension_resolve", "Preset: tension → resolve"]
+    ["tension_resolve", "Preset: tension -> resolve"]
   ]);
-  const promptArea = el("textarea", { className: "textarea", placeholder: "Describe what you want to compose/change…" }) as HTMLTextAreaElement;
+  agentHeader.append(agentTitleGroup, presetSelect);
+  const promptArea = el("textarea", { className: "textarea composer-prompt", placeholder: "Describe what to compose or change..." }) as HTMLTextAreaElement;
   const stepModeInput = el("input", { type: "checkbox" }) as HTMLInputElement;
   const stepModeLabel = el("label", { className: "checkbox" });
   stepModeLabel.append(stepModeInput, document.createTextNode(" Step mode"));
-  const scopeModeToggle = button("Scope Select");
+  const scopeModeToggle = button("Draw scope");
 
   const barStartInput = el("input", { type: "number", value: "1", min: "1", className: "input" }) as HTMLInputElement;
-  const barsInput = el("input", { type: "number", value: "4", min: "1", className: "input" }) as HTMLInputElement;
+  const barsInput = el("input", { type: "number", value: "8", min: "1", className: "input" }) as HTMLInputElement;
   const pitchMinInput = el("input", { type: "number", placeholder: "Pitch min", className: "input" }) as HTMLInputElement;
   const pitchMaxInput = el("input", { type: "number", placeholder: "Pitch max", className: "input" }) as HTMLInputElement;
 
-  const runBtn = button("Run (Propose)");
+  const runBtn = button("Compose");
   const stopBtn = button("Stop");
   const applyBtn = button("Apply");
   const rejectBtn = button("Reject");
   const undoBtn = button("Undo");
+  runBtn.classList.add("primary");
   const status = el("div", { className: "status-box", textContent: "Load a MIDI file or click New Blank to begin." });
   const timeline = el("div", { className: "timeline" });
 
@@ -184,22 +191,31 @@ export const createLayout = (): LayoutElements => {
   const scrubRow = el("div", { className: "row" });
   scrubRow.append(scrubBaseBtn, scrubLatestBtn, scrubReplayBtn, auditionBtn);
 
-  agent.append(
-    agentTitle,
-    presetSelect,
-    promptArea,
-    stepModeLabel,
-    scopeModeToggle,
+  const composeActions = row(runBtn, stopBtn, undoBtn);
+  composeActions.classList.add("action-row");
+  const fallbackActions = row(applyBtn, rejectBtn);
+  fallbackActions.classList.add("fallback-actions", "hidden");
+  const rangePanel = el("div", { className: "composer-range" });
+  rangePanel.append(
+    el("div", { className: "section-title", textContent: "Composition range" }),
     gridRow("Start bar", barStartInput, "Bars", barsInput),
     gridRow("Pitch min", pitchMinInput, "Pitch max", pitchMaxInput),
-    row(runBtn, stopBtn, applyBtn, rejectBtn, undoBtn),
+    row(scopeModeToggle, stepModeLabel)
+  );
+  const activityHeader = el("div", { className: "panel-title small", textContent: "Live activity" });
+  const scrubberPanel = el("div", { className: "scrubber-panel" });
+  scrubberPanel.append(el("div", { className: "section-title", textContent: "Step scrubber" }), scrubLabel, scrubRange, scrubRow);
+
+  agent.append(
+    agentHeader,
+    promptArea,
+    rangePanel,
+    composeActions,
+    fallbackActions,
     status,
-    el("div", { className: "section-title", textContent: "Tool-call timeline" }),
+    activityHeader,
     timeline,
-    el("div", { className: "section-title", textContent: "Step scrubber" }),
-    scrubLabel,
-    scrubRange,
-    scrubRow
+    scrubberPanel
   );
 
   const transport = el("div", { className: "transport-dock" });

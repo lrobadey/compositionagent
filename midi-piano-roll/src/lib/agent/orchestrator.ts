@@ -58,14 +58,18 @@ export type AgentStreamEvent =
 
 const buildInstructions = (stepMode: boolean, stepMaxNotesPerAdd: number): string => {
   const base = [
-    "You are a MIDI composer working inside a piano-roll editor.",
+    "You are an agentic MIDI composer working inside a piano-roll editor.",
     "You MUST ONLY act by calling the provided tools (function calls).",
     "Never output MIDI bytes or attempt to describe MIDI file encoding.",
-    "Stay strictly within the provided scope (time/pitch/track) and make minimal, targeted edits.",
-    "After you receive the prompt (and once you have called get_scope_summary), create a MACRO PLAN via composer_thought (one concise sentence).",
-    "Then develop musical MATERIAL first (motifs/contour/harmony/rhythm) using composer_thought with explicit note names (e.g., C#4, G3) and composition language.",
-    "Only once you're satisfied with the idea should you begin implementing it with mutating tool calls that write/modify notes.",
-    "Work iteratively: inspect via summary/list/find, apply edits, validate mentally, then call finalize_proposal exactly once.",
+    "The workspace is 4/4 time and the first composition canvas is 8 bars long.",
+    "Think in musical terms first: bars, beats, note names, durations, phrases, harmony, rhythm, contour, and register.",
+    "Form a short internal plan before placing notes.",
+    "Use JSON only as the tool language; do not let raw JSON become the composition language.",
+    "Stay strictly within the provided 8-bar scope unless the user's selected scope is smaller.",
+    "Compose deliberately with place_note, usually placing 1-3 notes per tool call.",
+    "Review your work with review_notes before finalizing.",
+    "If review shows weak spots, use edit_note or delete_notes and then review again.",
+    "Call finalize_composition_run exactly once when the composition run is complete.",
     "If a tool call fails due to scope or caps, adjust your plan and try a smaller change."
   ];
 
@@ -74,19 +78,20 @@ const buildInstructions = (stepMode: boolean, stepMaxNotesPerAdd: number): strin
   const maxNotes = Math.max(1, Math.floor(stepMaxNotesPerAdd));
   const step = [
     "YOU ARE IN STEP MODE.",
-    "You may repeat the following block multiple times per response: composer_thought -> ONE mutating tool call.",
-    "Before EACH mutating tool call, call composer_thought with 1 short sentence describing your next step (use note names + composition language).",
-    `If adding notes, each add_notes call must include at most ${maxNotes} notes.`,
-    "Stop when you're done OR when you reach the step cap; then call finalize_proposal exactly once.",
-    "Do not use macro tools (arpeggiate, add_chord_progression, add_drums_pattern, etc.) in step mode."
+    "Use one mutating tool call at a time, then review or continue.",
+    `Each place_note call must include at most ${maxNotes} notes.`,
+    "Stop when you're done OR when you reach the step cap; then call finalize_composition_run exactly once.",
+    "Do not use macro tools; only the five provided composer tools are available."
   ];
 
   return [...base, "", ...step].join("\n");
 };
 
 const MUTATING_TOOLS = new Set([
-  "add_notes",
+  "place_note",
+  "edit_note",
   "delete_notes",
+  "add_notes",
   "move_notes",
   "resize_notes",
   "set_velocity",
@@ -139,7 +144,7 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
     params.userPrompt.trim(),
     presetHint(params.stylePreset),
     scopeLabel,
-    "Start by calling get_scope_summary(scopeId)."
+    "Start by calling review_notes(scopeId, barStart: null, barEnd: null, limit: 200)."
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -156,13 +161,13 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
       return session.finalize(`Stopped after ${stepMaxSteps} steps (step mode cap).`);
     }
     const body: any = {
-      model: "gpt-5.2",
+      model: "gpt-5.4",
       instructions: buildInstructions(stepMode, stepMaxNotesPerAdd),
       tool_choice: "auto",
       tools,
       parallel_tool_calls: false,
       store: false,
-      reasoning: { effort: "high" },
+      reasoning: { effort: "medium" },
       input: inputList
     };
     if (stream) body.stream = true;
@@ -214,7 +219,6 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
       inputList.push(...callItems);
       if (callItems.length === 0) break;
 
-      let sawThoughtSinceLastMutate = false;
       for (const call of callItems) {
         toolCalls += 1;
         let args: any = {};
@@ -230,21 +234,16 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
           return session.finalize(`Stopped after ${stepMaxSteps} steps (step mode cap).`);
         }
 
-        if (stepMode && isMutating && !sawThoughtSinceLastMutate) {
-          result = { ok: false, error: "step_mode_missing_thought" };
-        } else if (
+        if (
           stepMode &&
-          call.name === "add_notes" &&
+          (call.name === "place_note" || call.name === "add_notes") &&
           Array.isArray(args?.notes) &&
           args.notes.length > stepMaxNotesPerAdd
         ) {
           result = { ok: false, error: "step_mode_max_notes_exceeded", max: stepMaxNotesPerAdd };
         } else {
           result = runTool(call.name, args);
-          if (stepMode && call.name === "composer_thought" && Boolean(result?.ok)) {
-            sawThoughtSinceLastMutate = true;
-          } else if (stepMode && isMutating) {
-            sawThoughtSinceLastMutate = false;
+          if (stepMode && isMutating) {
             stepsCompleted += 1;
             if (stepsCompleted >= stepMaxSteps) {
               // Stop immediately after completing the step.
@@ -280,7 +279,7 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
 
         params.onDraftUpdate?.({ draftState: session.draftState, opCount: session.opLog.length, lastTool: tool });
 
-        if (call.name === "finalize_proposal") return session.finalize(args?.musicalSummary);
+        if (call.name === "finalize_composition_run" || call.name === "finalize_proposal") return session.finalize(args?.musicalSummary);
         if (toolCalls >= maxToolCalls) break;
       }
       continue;
@@ -291,7 +290,6 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
     /** Keyed by output_index */
     const inProgress: Record<number, FunctionCallItem> = {};
     let sawAnyCall = false;
-    let sawThoughtSinceLastMutate = false;
 
     const emitStatus = (message: string) => params.onStreamEvent?.({ type: "status", message });
 
@@ -384,21 +382,16 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
           return session.finalize(`Stopped after ${stepMaxSteps} steps (step mode cap).`);
         }
 
-        if (stepMode && isMutating && !sawThoughtSinceLastMutate) {
-          result = { ok: false, error: "step_mode_missing_thought" };
-        } else if (
+        if (
           stepMode &&
-          call.name === "add_notes" &&
+          (call.name === "place_note" || call.name === "add_notes") &&
           Array.isArray(args?.notes) &&
           args.notes.length > stepMaxNotesPerAdd
         ) {
           result = { ok: false, error: "step_mode_max_notes_exceeded", max: stepMaxNotesPerAdd };
         } else {
           result = runTool(call.name, args);
-          if (stepMode && call.name === "composer_thought" && Boolean(result?.ok)) {
-            sawThoughtSinceLastMutate = true;
-          } else if (stepMode && isMutating) {
-            sawThoughtSinceLastMutate = false;
+          if (stepMode && isMutating) {
             stepsCompleted += 1;
             if (stepsCompleted >= stepMaxSteps) {
               inputList.push({
@@ -431,7 +424,7 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
         });
         params.onDraftUpdate?.({ draftState: session.draftState, opCount: session.opLog.length, lastTool: tool });
 
-        if (call.name === "finalize_proposal") return session.finalize(args?.musicalSummary);
+        if (call.name === "finalize_composition_run" || call.name === "finalize_proposal") return session.finalize(args?.musicalSummary);
         if (toolCalls >= maxToolCalls) break;
         continue;
       }

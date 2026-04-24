@@ -61,6 +61,8 @@ let lastPlayheadTick = 0;
 const undoStack: import("./lib/compose/ops").ComposeOp[][] = [];
 
 const MUTATING_TOOL_NAMES = new Set([
+  "place_note",
+  "edit_note",
   "add_notes",
   "delete_notes",
   "move_notes",
@@ -192,7 +194,7 @@ const controller = new PianoRollController({
       ui: { ...s.ui, scopeRect: range, scopeSelectMode: false }
     }));
     layout.agent.scopeModeToggle.classList.remove("active");
-    layout.agent.scopeModeToggle.textContent = "Scope Select";
+    layout.agent.scopeModeToggle.textContent = "Draw scope";
     renderAll();
   }
 });
@@ -250,7 +252,7 @@ layout.header.newBtn.addEventListener("click", () => {
   parsedProject = null;
   controller.stop();
   initProject(createBlankProject());
-  layout.agent.status.textContent = "Blank project ready. Enter a prompt and click Run.";
+  layout.agent.status.textContent = "Blank project ready. Enter a prompt and click Compose.";
 });
 
 layout.header.exportBtn.addEventListener("click", () => {
@@ -295,7 +297,7 @@ layout.project.scopePresetBar.addEventListener("click", () => {
   const mm = getState().project.measureMap;
   if (!mm) return;
   const tickStart = barToTick(mm, 1);
-  const tickEnd = barToTick(mm, 5);
+  const tickEnd = barToTick(mm, 9);
   updateState((s) => ({ ...s, ui: { ...s.ui, scopeRect: { tickStart, tickEnd, pitchMin: 0, pitchMax: 127 } } }));
   renderAll();
 });
@@ -332,7 +334,7 @@ layout.project.scopePresetVisible.addEventListener("click", () => {
 layout.agent.scopeModeToggle.addEventListener("click", () => {
   updateState((s) => ({ ...s, ui: { ...s.ui, scopeSelectMode: !s.ui.scopeSelectMode } }));
   layout.agent.scopeModeToggle.classList.toggle("active", getState().ui.scopeSelectMode);
-  layout.agent.scopeModeToggle.textContent = getState().ui.scopeSelectMode ? "Scope Select: On" : "Scope Select";
+  layout.agent.scopeModeToggle.textContent = getState().ui.scopeSelectMode ? "Draw scope: On" : "Draw scope";
 });
 
 layout.agent.scrubRange.addEventListener("input", () => {
@@ -614,6 +616,7 @@ const refreshAgentButtons = (): void => {
   layout.agent.stopBtn.disabled = !running;
   layout.agent.applyBtn.disabled = running || !hasProposal;
   layout.agent.rejectBtn.disabled = running || !hasProposal;
+  layout.agent.applyBtn.parentElement?.classList.toggle("hidden", !hasProposal);
   layout.agent.undoBtn.disabled = running || undoStack.length === 0;
   layout.header.exportBtn.disabled = running || !hasLive;
   layout.agent.stepModeInput.disabled = running || !hasLive || hasProposal;
@@ -681,7 +684,7 @@ const runAgent = async (): Promise<void> => {
   if (!liveState || !measureMap) return;
   const t = state.project.selectedTrackIndex;
   const startBar = Number(layout.agent.barStartInput.value || "1");
-  const bars = Number(layout.agent.barsInput.value || "4");
+  const bars = Number(layout.agent.barsInput.value || "8");
   const tickStart = barToTick(measureMap, startBar);
   const tickEnd = barToTick(measureMap, startBar + Math.max(1, bars));
 
@@ -725,7 +728,7 @@ const runAgent = async (): Promise<void> => {
       stream: true,
       signal: agentAbort.signal,
       stepMode: layout.agent.stepModeInput.checked,
-      stepMaxNotesPerAdd: 4,
+      stepMaxNotesPerAdd: 3,
       stepMaxSteps: 64,
       maxToolCalls: layout.agent.stepModeInput.checked ? 160 : undefined,
       onStreamEvent: (e) => onStreamEvent(e),
@@ -765,15 +768,28 @@ const runAgent = async (): Promise<void> => {
     const baseTrack = p.baseState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
     const draftTrack = p.draftState.tracks.find((x) => x.trackIndex === scope.trackIndex)!;
     const diff = diffNotes(baseTrack, draftTrack, scope);
-
-    updateState((s) => ({
-      ...s,
-      project: { ...s.project, proposal: { scope, baseState: p.baseState, draftState: p.draftState, ops: p.ops, diff, warnings: p.warnings, musicalSummary: p.musicalSummary } },
-      agent: { ...s.agent, running: false, streamingDraftState: null }
-    }));
-    layout.agent.status.textContent = `Proposal: +${diff.counts.added} −${diff.counts.removed} ~${diff.counts.modified}${
-      p.warnings.length ? ` • warnings: ${p.warnings.length}` : ""
-    }${p.musicalSummary ? `\n${p.musicalSummary}` : ""}`;
+    const res = applyOps(liveState, p.ops, scope);
+    if (res.appliedOps.length > 0 && res.rejectedOps.length === 0) {
+      undoStack.push(res.inverseOps);
+      updateState((s) => ({
+        ...s,
+        project: { ...s.project, liveState: res.nextState, proposal: null },
+        agent: { ...s.agent, running: false, streamingDraftState: null },
+        ui: { ...s.ui, scrubMode: false, previewMode: "draft" }
+      }));
+      layout.agent.status.textContent = `Composed: +${diff.counts.added} −${diff.counts.removed} ~${diff.counts.modified}${
+        p.warnings.length ? ` • warnings: ${p.warnings.length}` : ""
+      }${p.musicalSummary ? `\n${p.musicalSummary}` : ""}`;
+    } else {
+      updateState((s) => ({
+        ...s,
+        project: { ...s.project, proposal: { scope, baseState: p.baseState, draftState: p.draftState, ops: p.ops, diff, warnings: p.warnings, musicalSummary: p.musicalSummary } },
+        agent: { ...s.agent, running: false, streamingDraftState: null }
+      }));
+      layout.agent.status.textContent = `No composition committed${
+        res.rejectedOps.length ? `: ${res.rejectedOps.map((r) => r.reason).join("; ")}` : ""
+      }${p.musicalSummary ? `\n${p.musicalSummary}` : ""}`;
+    }
     notesById = new Map(draftTrack.notes.map((n) => [n.id, n]));
     controller.clearSelection();
     recomputeMaps();
@@ -950,6 +966,8 @@ function clearWithLabel(ctx: CanvasRenderingContext2D, host: HTMLElement, label:
   const rect = host.getBoundingClientRect();
   resizeCanvas(ctx.canvas, rect.width, rect.height);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   if (!label) return;
   ctx.fillStyle = theme.muted;
   ctx.font = "14px ui-sans-serif, system-ui";
@@ -961,7 +979,7 @@ function readTheme(): RenderTheme {
   const cs = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
   return {
-    bg: v("--bg", "#0b0d12"),
+    bg: v("--canvas", "#0b0d12"),
     keyWhite: v("--key-white", "rgba(255,255,255,0.035)"),
     keyBlack: v("--key-black", "rgba(0,0,0,0.26)"),
     gridMajor: v("--grid-major", "rgba(255,255,255,0.12)"),

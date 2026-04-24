@@ -169,7 +169,7 @@ describe("step mode", () => {
     expect(proposal.draftState.tracks[0]!.notes[1]!.pitch).toBe(62);
   });
 
-  it("requires a composer_thought before mutating tools", async () => {
+  it("allows deliberate musical placement without a separate thought tool", async () => {
     let callIndex = 0;
     const scopeId = "SCOPE";
 
@@ -185,10 +185,10 @@ describe("step mode", () => {
               {
                 type: "function_call",
                 call_id: "c1",
-                name: "add_notes",
+                name: "place_note",
                 arguments: JSON.stringify({
                   scopeId,
-                  notes: [{ id: null, pitch: 60, startTick: 0, durationTicks: 120, velocity: 0.5 }]
+                  notes: [{ id: null, pitchName: "C4", bar: 1, beat: 1, duration: "quarter", velocity: 0.5 }]
                 })
               }
             ]
@@ -225,8 +225,9 @@ describe("step mode", () => {
       maxToolCalls: 50
     });
 
-    expect(proposal.ops.length).toBe(0);
-    expect(proposal.draftState.tracks[0]!.notes.length).toBe(0);
+    expect(proposal.ops.length).toBe(1);
+    expect(proposal.draftState.tracks[0]!.notes.length).toBe(1);
+    expect(proposal.draftState.tracks[0]!.notes[0]!.pitch).toBe(60);
   });
 
   it("stops after step cap without requiring finalize_proposal", async () => {

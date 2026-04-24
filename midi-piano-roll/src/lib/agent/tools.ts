@@ -6,6 +6,12 @@ import { MAX_NOTES_ADDED_PER_PROPOSAL, MAX_NOTES_TOUCHED_PER_OP } from "../compo
 import type { Scope } from "./scope";
 import { normalizeScope, scopeContains } from "./scope";
 import type { DraftSession, Proposal } from "./draft";
+import {
+  durationToTicks,
+  parsePitchName,
+  positionToTick,
+  tickToMusicalPosition
+} from "./musicalTime";
 
 export type ToolResult = { ok: boolean; error?: string; warnings?: string[] } & Record<string, unknown>;
 
@@ -36,67 +42,9 @@ const nullableString = (): Record<string, unknown> => ({ anyOf: [{ type: "string
 
 export const buildToolDefinitions = (): ToolDefinition[] => [
   {
-    name: "composer_thought",
+    name: "place_note",
     description:
-      "Share a brief composing thought for this step (one concise sentence; may include note names like C#4 and composition language). Does not modify notes.",
-    parameters: {
-      type: "object",
-      properties: { scopeId: { type: "string" }, text: { type: "string" } },
-      required: ["scopeId", "text"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "get_scope_summary",
-    description: "Summarize the current editable scope (time/pitch range, note count, density hints).",
-    parameters: {
-      type: "object",
-      properties: { scopeId: { type: "string" } },
-      required: ["scopeId"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "list_notes",
-    description: "List a small slice of notes for local reasoning (time window + optional pitch filters).",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        tickStart: { type: "number" },
-        tickEnd: { type: "number" },
-        pitchMin: nullableNumber(),
-        pitchMax: nullableNumber(),
-        limit: { type: "number" }
-      },
-      // Strict schemas require the model to supply every key; treat optional fields as nullable.
-      required: ["scopeId", "tickStart", "tickEnd", "pitchMin", "pitchMax", "limit"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "find_notes",
-    description: "Find notes by simple filters (pitch/time/velocity). Returns ids only by default.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        pitch: nullableNumber(),
-        pitchMin: nullableNumber(),
-        pitchMax: nullableNumber(),
-        tickStart: nullableNumber(),
-        tickEnd: nullableNumber(),
-        velocityMin: nullableNumber(),
-        velocityMax: nullableNumber(),
-        limit: { type: "number" }
-      },
-      required: ["scopeId", "pitch", "pitchMin", "pitchMax", "tickStart", "tickEnd", "velocityMin", "velocityMax", "limit"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "add_notes",
-    description: "Add notes in the current scope (batch). Each note includes pitch, startTick, durationTicks, velocity.",
+      "Place 1-3 notes using musical terms. Prefer deliberate 1-3 note batches: pitchName like C4, bar, beat, duration like quarter/half, and velocity 0..1.",
     parameters: {
       type: "object",
       properties: {
@@ -107,12 +55,13 @@ export const buildToolDefinitions = (): ToolDefinition[] => [
             type: "object",
             properties: {
               id: nullableString(),
-              pitch: { type: "number" },
-              startTick: { type: "number" },
-              durationTicks: { type: "number" },
+              pitchName: { type: "string" },
+              bar: { type: "number" },
+              beat: { type: "number" },
+              duration: { anyOf: [{ type: "string" }, { type: "number" }] },
               velocity: { type: "number" }
             },
-            required: ["id", "pitch", "startTick", "durationTicks", "velocity"],
+            required: ["id", "pitchName", "bar", "beat", "duration", "velocity"],
             additionalProperties: false
           }
         }
@@ -122,184 +71,60 @@ export const buildToolDefinitions = (): ToolDefinition[] => [
     }
   },
   {
+    name: "review_notes",
+    description: "Review existing notes in the current workspace or a smaller bar range before revising or finalizing.",
+    parameters: {
+      type: "object",
+      properties: {
+        scopeId: { type: "string" },
+        barStart: nullableNumber(),
+        barEnd: nullableNumber(),
+        limit: { type: "number" }
+      },
+      required: ["scopeId", "barStart", "barEnd", "limit"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "edit_note",
+    description:
+      "Edit one existing note by id. Any of pitchName, bar, beat, duration, or velocity may be supplied; use null for unchanged fields.",
+    parameters: {
+      type: "object",
+      properties: {
+        scopeId: { type: "string" },
+        noteId: { type: "string" },
+        pitchName: nullableString(),
+        bar: nullableNumber(),
+        beat: nullableNumber(),
+        duration: { anyOf: [{ type: "string" }, { type: "number" }, { type: "null" }] },
+        velocity: nullableNumber()
+      },
+      required: ["scopeId", "noteId", "pitchName", "bar", "beat", "duration", "velocity"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "delete_notes",
-    description: "Delete notes by id.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        noteIds: { type: "array", items: { type: "string" } }
-      },
-      required: ["scopeId", "noteIds"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "move_notes",
-    description: "Move notes by (deltaTicks, deltaPitch).",
+    description:
+      "Delete notes by noteIds or by a musical bar range. A narrow range can delete one note; a wider range can delete many.",
     parameters: {
       type: "object",
       properties: {
         scopeId: { type: "string" },
         noteIds: { type: "array", items: { type: "string" } },
-        deltaTicks: { type: "number" },
-        deltaPitch: { type: "number" }
-      },
-      required: ["scopeId", "noteIds", "deltaTicks", "deltaPitch"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "resize_notes",
-    description: "Resize notes by setting durationTicks or endTick.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        noteIds: { type: "array", items: { type: "string" } },
-        durationTicks: nullableNumber(),
-        endTick: nullableNumber()
-      },
-      required: ["scopeId", "noteIds", "durationTicks", "endTick"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "set_velocity",
-    description: "Set velocity for a set of notes (0..1).",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        noteIds: { type: "array", items: { type: "string" } },
-        velocity: { type: "number" }
-      },
-      required: ["scopeId", "noteIds", "velocity"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "clear_range",
-    description: "Clear notes that overlap a tick range (and optional pitch range).",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        tickStart: { type: "number" },
-        tickEnd: { type: "number" },
+        barStart: nullableNumber(),
+        barEnd: nullableNumber(),
         pitchMin: nullableNumber(),
         pitchMax: nullableNumber()
       },
-      required: ["scopeId", "tickStart", "tickEnd", "pitchMin", "pitchMax"],
+      required: ["scopeId", "noteIds", "barStart", "barEnd", "pitchMin", "pitchMax"],
       additionalProperties: false
     }
   },
   {
-    name: "quantize",
-    description: "Quantize notes (selected/range/all) to a grid.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        target: { type: "string", enum: ["selected", "range", "all"] },
-        grid: {
-          type: "object",
-          properties: { divisionPerBeat: { type: "number", enum: [4, 8, 16] } },
-          required: ["divisionPerBeat"],
-          additionalProperties: false
-        },
-        mode: { type: "string", enum: ["start", "start_end"] },
-        tickStart: nullableNumber(),
-        tickEnd: nullableNumber(),
-        noteIds: { type: "array", items: { type: "string" } }
-      },
-      required: ["scopeId", "target", "grid", "mode", "tickStart", "tickEnd", "noteIds"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "humanize",
-    description: "Humanize notes (selected/range/all) by random timing/velocity with a deterministic seed.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        target: { type: "string", enum: ["selected", "range", "all"] },
-        timingStddevTicks: { type: "number" },
-        velocityStddev: { type: "number" },
-        seed: { type: "number" },
-        tickStart: nullableNumber(),
-        tickEnd: nullableNumber(),
-        noteIds: { type: "array", items: { type: "string" } }
-      },
-      required: ["scopeId", "target", "timingStddevTicks", "velocityStddev", "seed", "tickStart", "tickEnd", "noteIds"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "add_chord_progression",
-    description: "Macro: add a simple chord progression as block chords inside the scope.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        key: { type: "string" },
-        scale: { type: "string", enum: ["major", "minor"] },
-        progression: { type: "array", items: { type: "string" } },
-        rhythm: { type: "string", enum: ["whole", "half", "quarter"] },
-        voicing: { type: "string", enum: ["triad", "seventh"] },
-        tickStart: { type: "number" },
-        bars: { type: "number" }
-      },
-      required: ["scopeId", "key", "scale", "progression", "rhythm", "voicing", "tickStart", "bars"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "arpeggiate",
-    description: "Macro: add an arpeggio pattern for a chord inside the scope.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        pattern: { type: "string", enum: ["up", "down", "updown", "random"] },
-        rate: { type: "string", enum: ["8th", "16th"] },
-        tickStart: { type: "number" },
-        bars: { type: "number" },
-        chord: {
-          type: "object",
-          properties: {
-            root: { type: "string" },
-            quality: { type: "string", enum: ["maj", "min", "dim", "aug"] },
-            octave: nullableNumber()
-          },
-          required: ["root", "quality", "octave"],
-          additionalProperties: false
-        }
-      },
-      required: ["scopeId", "pattern", "rate", "tickStart", "bars", "chord"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "drum_pattern_basic",
-    description: "Macro: add a basic drum pattern (kick/snare/hats) using GM drum pitches.",
-    parameters: {
-      type: "object",
-      properties: {
-        scopeId: { type: "string" },
-        style: { type: "string", enum: ["four_on_floor", "hiphop_basic"] },
-        bars: { type: "number" },
-        density: { type: "string", enum: ["low", "medium", "high"] },
-        tickStart: { type: "number" }
-      },
-      required: ["scopeId", "style", "bars", "density", "tickStart"],
-      additionalProperties: false
-    }
-  },
-  {
-    name: "finalize_proposal",
-    description: "Finalize and return the proposal ops and summary. Must be called exactly once at the end.",
+    name: "finalize_composition_run",
+    description: "Finalize this composition run after reviewing the notes. Include a concise musical summary.",
     parameters: {
       type: "object",
       properties: {
@@ -377,6 +202,181 @@ export const createToolRunner = (session: DraftSession): ((name: string, args: a
     if (op.scopeId !== session.scopeId) return { ok: false, error: "invalid scopeId" };
     const res = session.apply(op);
     return { ok: res.applied, warnings: res.warnings };
+  };
+
+  const barRangeToTicks = (barStart?: number | null, barEnd?: number | null): { tickStart: number; tickEnd: number } => {
+    const measureMap = session.getMeasureMap();
+    const startBar = Math.max(1, Math.floor(barStart ?? 1));
+    const endBar = Math.max(startBar, Math.floor(barEnd ?? 8));
+    return {
+      tickStart: Math.max(scope.tickStart, positionToTick(measureMap, { bar: startBar, beat: 1 })),
+      tickEnd: Math.min(scope.tickEnd, positionToTick(measureMap, { bar: endBar + 1, beat: 1 }))
+    };
+  };
+
+  const timeSignatureAtTick = (tick: number): string => {
+    const timeSignatures = session.draftState.timeSignatures.length
+      ? session.draftState.timeSignatures
+      : [{ tick: 0, numerator: 4, denominator: 4 }];
+    const sorted = [...timeSignatures].sort((a, b) => a.tick - b.tick);
+    const active = [...sorted].reverse().find((ts) => ts.tick <= tick) ?? sorted[0]!;
+    return `${active.numerator}/${active.denominator}`;
+  };
+
+  const describeTickRange = (measureMap: MeasureMap, tickStart: number, tickEnd: number) => {
+    const start = tickToMusicalPosition(measureMap, tickStart);
+    const end = tickToMusicalPosition(measureMap, tickEnd);
+    const endAtBarBoundary = end.beat === 1 && end.tick === 0;
+    const bars = Math.max(0, end.bar - start.bar + (endAtBarBoundary ? 0 : 1));
+    return { tickStart, tickEnd, start, end, bars };
+  };
+
+  const placeNote = (args: any): ToolResult => {
+    const err = ensureScope(args.scopeId);
+    if (err) return { ok: false, error: err };
+    const measureMap = session.getMeasureMap();
+    const sourceNotes: any[] = Array.isArray(args.notes) ? args.notes : [];
+    if (sourceNotes.length === 0) return { ok: false, error: "missing notes" };
+    if (sourceNotes.length > 3) return { ok: false, error: "place_note accepts at most 3 notes; prefer 1-3 notes per call" };
+    try {
+      const notes = sourceNotes.map((n) => ({
+        id: typeof n.id === "string" && n.id.trim() ? n.id.trim() : null,
+        pitch: parsePitchName(String(n.pitchName ?? "")),
+        startTick: positionToTick(measureMap, { bar: Number(n.bar), beat: Number(n.beat) }),
+        durationTicks: durationToTicks(n.duration, session.draftState.ppq),
+        velocity: n.velocity
+      }));
+      return addNotes(args.scopeId, notes);
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) };
+    }
+  };
+
+  const reviewNotes = (args: any): ToolResult => {
+    const err = ensureScope(args.scopeId);
+    if (err) return { ok: false, error: err };
+    const measureMap = session.getMeasureMap();
+    const { tickStart, tickEnd } = barRangeToTicks(args.barStart, args.barEnd);
+    const limit = Math.max(1, Math.min(500, Math.floor(args.limit ?? 200)));
+    const scopeRange = describeTickRange(measureMap, scope.tickStart, scope.tickEnd);
+    const reviewedRange = describeTickRange(measureMap, tickStart, tickEnd);
+    const notes = session
+      .getTrack()
+      .notes.filter((n) => scopeContains(scope, n) && n.startTick >= tickStart && n.endTick <= tickEnd)
+      .slice(0, limit)
+      .map((n) => ({
+        id: n.id,
+        pitch: n.pitch,
+        pitchName: pitchToName(n.pitch),
+        position: tickToMusicalPosition(measureMap, n.startTick, n.durationTicks),
+        velocity: n.velocity
+      }));
+    return {
+      ok: true,
+      workspace: {
+        timeSignature: timeSignatureAtTick(scope.tickStart),
+        bars: scopeRange.bars,
+        scope: scopeRange,
+        reviewedRange
+      },
+      notes
+    };
+  };
+
+  const editNote = (args: any): ToolResult => {
+    const err = ensureScope(args.scopeId);
+    if (err) return { ok: false, error: err };
+    const noteId = typeof args.noteId === "string" ? args.noteId : "";
+    const note = session.getTrack().notes.find((n) => n.id === noteId);
+    if (!note) return { ok: false, error: "note not found" };
+
+    const ops: ComposeOp[] = [];
+    try {
+      const measureMap = session.getMeasureMap();
+      const currentPosition = tickToMusicalPosition(measureMap, note.startTick);
+      const targetPitch = args.pitchName == null ? note.pitch : parsePitchName(String(args.pitchName));
+      const targetStart =
+        args.bar == null && args.beat == null
+          ? note.startTick
+          : positionToTick(measureMap, {
+              bar: args.bar == null ? currentPosition.bar : Number(args.bar),
+              beat: args.beat == null ? currentPosition.beat : Number(args.beat),
+              tick: currentPosition.tick
+            });
+      const targetDuration = args.duration == null ? note.durationTicks : durationToTicks(args.duration, session.draftState.ppq);
+      const targetVelocity = args.velocity == null ? note.velocity : clampVelocity(args.velocity);
+
+      if (targetStart !== note.startTick || targetPitch !== note.pitch) {
+        ops.push({
+          kind: "move_notes",
+          opId: opId(),
+          scopeId: args.scopeId,
+          trackIndex: scope.trackIndex,
+          noteIds: [noteId],
+          deltaTicks: targetStart - note.startTick,
+          deltaPitch: targetPitch - note.pitch
+        });
+      }
+      if (targetDuration !== note.durationTicks) {
+        ops.push({
+          kind: "resize_notes",
+          opId: opId(),
+          scopeId: args.scopeId,
+          trackIndex: scope.trackIndex,
+          noteIds: [noteId],
+          durationTicks: targetDuration
+        });
+      }
+      if (targetVelocity !== note.velocity) {
+        ops.push({
+          kind: "set_velocity",
+          opId: opId(),
+          scopeId: args.scopeId,
+          trackIndex: scope.trackIndex,
+          noteIds: [noteId],
+          velocity: targetVelocity
+        });
+      }
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) };
+    }
+
+    const warnings: string[] = [];
+    let applied = false;
+    for (const op of ops) {
+      const res = session.apply(op);
+      applied = applied || res.applied;
+      warnings.push(...res.warnings);
+      if (!res.applied) warnings.push("edit operation was rejected");
+    }
+    return { ok: ops.length === 0 || applied, warnings };
+  };
+
+  const deleteNotesMusical = (args: any): ToolResult => {
+    const err = ensureScope(args.scopeId);
+    if (err) return { ok: false, error: err };
+    const noteIds = Array.isArray(args.noteIds) ? args.noteIds.filter((id: unknown) => typeof id === "string") : [];
+    if (noteIds.length > 0) {
+      if (noteIds.length > MAX_NOTES_TOUCHED_PER_OP) return { ok: false, error: "too many noteIds" };
+      return applySimple({
+        kind: "delete_notes",
+        opId: opId(),
+        scopeId: args.scopeId,
+        trackIndex: scope.trackIndex,
+        noteIds
+      });
+    }
+    const { tickStart, tickEnd } = barRangeToTicks(args.barStart, args.barEnd);
+    return applySimple({
+      kind: "clear_range",
+      opId: opId(),
+      scopeId: args.scopeId,
+      trackIndex: scope.trackIndex,
+      tickStart,
+      tickEnd,
+      pitchMin: args.pitchMin,
+      pitchMax: args.pitchMax
+    });
   };
 
   const macroChordProgression = (args: any): ToolResult => {
@@ -497,6 +497,26 @@ export const createToolRunner = (session: DraftSession): ((name: string, args: a
 
   return (name: string, args: any): ToolResult => {
     switch (name) {
+      case "place_note":
+        return placeNote(args);
+      case "review_notes":
+        return reviewNotes(args);
+      case "edit_note":
+        return editNote(args);
+      case "delete_notes":
+        return deleteNotesMusical(args);
+      case "finalize_composition_run": {
+        const err = ensureScope(args.scopeId);
+        if (err) return { ok: false, error: err };
+        const proposal = session.finalize(args.musicalSummary);
+        return {
+          ok: true,
+          proposalId: proposal.proposalId,
+          diffStats: proposal.diffStats,
+          warnings: proposal.warnings,
+          musical_summary: proposal.musicalSummary ?? ""
+        };
+      }
       case "composer_thought": {
         const err = ensureScope(args.scopeId);
         if (err) return { ok: false, error: err };
@@ -548,15 +568,6 @@ export const createToolRunner = (session: DraftSession): ((name: string, args: a
       }
       case "add_notes":
         return addNotes(args.scopeId, args.notes ?? []);
-      case "delete_notes":
-        if ((args.noteIds?.length ?? 0) > MAX_NOTES_TOUCHED_PER_OP) return { ok: false, error: "too many noteIds" };
-        return applySimple({
-          kind: "delete_notes",
-          opId: opId(),
-          scopeId: args.scopeId,
-          trackIndex: scope.trackIndex,
-          noteIds: args.noteIds ?? []
-        });
       case "move_notes":
         if ((args.noteIds?.length ?? 0) > MAX_NOTES_TOUCHED_PER_OP) return { ok: false, error: "too many noteIds" };
         return applySimple({
