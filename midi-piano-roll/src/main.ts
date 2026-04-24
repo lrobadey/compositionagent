@@ -561,7 +561,7 @@ const renderThinkingPanel = (events: AgentTimelineEvent[]): void => {
   }
 
   if (latestSummary?.type === "thinking") {
-    panel.append(thinkingBlock("OpenAI summary", latestSummary.text));
+    panel.append(thinkingBlock("Composition Process", latestSummary.text));
   }
 
   if (latestThought?.type === "tool_applied" && latestThought.outputText) {
