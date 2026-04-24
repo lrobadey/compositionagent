@@ -57,17 +57,20 @@ export type AgentStreamEvent =
   | { type: "tool_call_done"; tool: ToolSummary }
   | { type: "tool_applied"; tool: ToolSummary; ok: boolean; warnings?: string[]; outputText?: string };
 
-const buildInstructions = (stepMode: boolean, stepMaxNotesPerAdd: number): string => {
+const buildInstructions = (stepMode: boolean, stepMaxNotesPerAdd: number, scopeSummary: string): string => {
   const base = [
     "You are Jean, a composition agent working inside a piano roll editor.",
     "Your job is to collaborate with the user and bring their vision to life.",
     "Compositionally, adapt to the user's intention while prioritizing smooth voice-leading and tension and release structures.",
     "When beginning with a blank slate, evaluate the user's request carefully; do they just want chords, a melody, or a more involved multi-voice segment? Don't default to surface-level outputs.",
     "Before beginning the actual composition, think carefully through how you're going to approach the task.",
+    "Form a short internal plan before the first tool call.",
+    "Default to shaping short ideas across 8 bars unless the user or scope clearly asks for a different span.",
     "Think in musical terms first: bars, beats, note names, durations, phrases, harmony, rhythm, contour, and register.",
     "You'll often be dealing with motifs. When reviewing existing music, always look carefully for anything motivic. This could also include rhythms and harmonies and textures as well as intervallic cells.",
+    scopeSummary,
     "You act by calling the provided tools.",
-    "Compose deliberately with place_note and prioritize placing a logical amount of notes per tool call, which is dependent on your goal.",
+    "Compose deliberately with place_note and prefer 1-3 notes per tool call unless the musical goal clearly calls for more.",
     "Review your work with review_notes before finalizing.",
     "Call finalize_composition_run exactly once when the composition run is complete."
   ];
@@ -137,6 +140,28 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
   }));
 
   const measureMap = session.getMeasureMap();
+  const timeSignatureAtTick = (tick: number): string => {
+    const timeSignatures = session.draftState.timeSignatures.length
+      ? session.draftState.timeSignatures
+      : [{ tick: 0, numerator: 4, denominator: 4 }];
+    const sorted = [...timeSignatures].sort((a, b) => a.tick - b.tick);
+    const active = [...sorted].reverse().find((ts) => ts.tick <= tick) ?? sorted[0]!;
+    return `${active.numerator}/${active.denominator}`;
+  };
+  const start = measureMap.tickToBarBeatTick(session.scope.tickStart);
+  const end = measureMap.tickToBarBeatTick(session.scope.tickEnd);
+  const endAtBarBoundary = end.beat === 1 && end.tick === 0;
+  const bars = Math.max(1, end.bar - start.bar + (endAtBarBoundary ? 0 : 1));
+  const scopeSummary = [
+    "Scope:",
+    `- time signature: ${timeSignatureAtTick(session.scope.tickStart)} time`,
+    `- length: ${bars} bars`,
+    `- trackIndex: ${session.scope.trackIndex}`,
+    `- tickStart: ${session.scope.tickStart}`,
+    `- tickEnd: ${session.scope.tickEnd}`,
+    `- start: ${start.bar}:${start.beat}`,
+    `- end: ${end.bar}:${end.beat}`
+  ].join("\n");
   const scopeLabel = `Scope:\n- scopeId: ${session.scopeId}\n- trackIndex: ${session.scope.trackIndex}\n- tickStart: ${session.scope.tickStart}\n- tickEnd: ${session.scope.tickEnd}\n- pitchMin: ${session.scope.pitchMin ?? "none"}\n- pitchMax: ${session.scope.pitchMax ?? "none"}\n- start: ${measureMap.tickToBarBeatTick(session.scope.tickStart).bar}:${measureMap.tickToBarBeatTick(session.scope.tickStart).beat}\n- end: ${measureMap.tickToBarBeatTick(session.scope.tickEnd).bar}:${measureMap.tickToBarBeatTick(session.scope.tickEnd).beat}`;
 
   const initialInput = [
@@ -161,7 +186,7 @@ export const runComposerAgent = async (params: RunComposerParams): Promise<Propo
     }
     const body: any = {
       model: "gpt-5.4",
-      instructions: buildInstructions(stepMode, stepMaxNotesPerAdd),
+      instructions: buildInstructions(stepMode, stepMaxNotesPerAdd, scopeSummary),
       tool_choice: "auto",
       tools,
       parallel_tool_calls: false,

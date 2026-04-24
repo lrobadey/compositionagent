@@ -22,6 +22,7 @@ import {
   type NoteLike
 } from "./lib/view/render";
 import { parseThinkingText, toolActionText } from "./ui/agentTrace";
+import { createComposerCockpit } from "./ui/cockpit";
 import { createLayout } from "./ui/layout";
 import { getState, updateState } from "./app/store";
 import type { AgentTimelineEvent } from "./app/store";
@@ -47,6 +48,7 @@ let notesById: Map<string, Note> = new Map();
 let agentAbort: AbortController | null = null;
 let lastPlayheadTick = 0;
 const undoStack: import("./lib/compose/ops").ComposeOp[][] = [];
+let composerCockpit: ReturnType<typeof createComposerCockpit>;
 
 const defaultPitchRange = (): { min: number; max: number } => ({ min: 48, max: 84 });
 const computePitchRange = (notes: Note[]): { min: number; max: number } => {
@@ -219,11 +221,12 @@ const initProject = (state: ProjectState): void => {
     agent: { ...s.agent, running: false, streamingDraftState: null, stepSnapshots: [], stepIndex: 0, timeline: [] },
     ui: { ...s.ui, scrubMode: false, previewMode: "draft", scopeRect: null, scopeSelectMode: false }
   }));
+  composerCockpit.reset();
   recomputeMaps();
   const first = state.tracks.find((t) => t.notes.length > 0) ?? state.tracks[0] ?? null;
   if (first) setTrackIndex(first.trackIndex);
   renderTrackOptions();
-  renderTimeline();
+  renderActionTimeline();
   refreshAgentButtons();
 };
 
@@ -412,7 +415,9 @@ const runAgent = async (): Promise<void> => {
     ui: { ...s.ui, scrubMode: false, previewMode: "draft" }
   }));
   layout.agent.status.textContent = "Running agent...";
-  renderTimeline();
+  composerCockpit.reset();
+  renderThinkingPanel([]);
+  renderActionTimeline();
   refreshAgentButtons();
 
   try {
@@ -436,6 +441,7 @@ const runAgent = async (): Promise<void> => {
       updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
       layout.agent.status.textContent = "Cancelled.";
       appendTimeline({ type: "status", message: "Cancelled.", at: Date.now() });
+      renderActionTimeline();
       return;
     }
 
@@ -456,6 +462,7 @@ const runAgent = async (): Promise<void> => {
       }${proposal.musicalSummary ? `\n${proposal.musicalSummary}` : ""}`;
       layout.agent.status.textContent = summary;
       appendTimeline({ type: "status", message: "Committed to live MIDI. Use Undo to reverse.", at: Date.now() });
+      renderActionTimeline();
     } else {
       const reason = result.rejectedOps.length ? result.rejectedOps.map((r) => r.reason).join("; ") : "agent produced no safe note edits";
       updateState((s) => ({
@@ -465,6 +472,7 @@ const runAgent = async (): Promise<void> => {
       }));
       layout.agent.status.textContent = `No composition committed: ${reason}${proposal.musicalSummary ? `\n${proposal.musicalSummary}` : ""}`;
       appendTimeline({ type: "error", message: `No live change: ${reason}`, at: Date.now() });
+      renderActionTimeline();
     }
 
     notesById = new Map((getActiveTrack()?.notes ?? draftTrack.notes).map((n) => [n.id, n]));
@@ -476,12 +484,13 @@ const runAgent = async (): Promise<void> => {
     updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
     layout.agent.status.textContent = `Failed to run agent: ${String(e)}`;
     appendTimeline({ type: "error", message: String(e), at: Date.now() });
+    renderActionTimeline();
   } finally {
     agentAbort = null;
     updateState((s) => ({ ...s, agent: { ...s.agent, running: false, streamingDraftState: null } }));
     notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
     refreshAgentButtons();
-    renderTimeline();
+    composerCockpit.flushFinalView();
     renderAll();
   }
 };
@@ -502,13 +511,11 @@ const onStreamEvent = (e: AgentStreamEvent): void => {
 
 const appendTimeline = (event: AgentTimelineEvent): void => {
   updateState((s) => ({ ...s, agent: { ...s.agent, timeline: [...s.agent.timeline, event] } }));
-  renderTimeline();
+  composerCockpit.append(event);
 };
 
-const renderTimeline = (): void => {
+const renderActionTimeline = (): void => {
   const events = getState().agent.timeline.slice(-120);
-  renderThinkingPanel(events);
-
   const list = layout.agent.actionTimeline;
   list.innerHTML = "";
   for (const e of events) {
@@ -597,6 +604,7 @@ const undoLast = (): void => {
   notesById = new Map((getActiveTrack()?.notes ?? []).map((n) => [n.id, n]));
   layout.agent.status.textContent = `Undone. Undo stack: ${undoStack.length}`;
   appendTimeline({ type: "status", message: "Undid last committed agent run.", at: Date.now() });
+  renderActionTimeline();
   renderTrackOptions();
   refreshAgentButtons();
   renderAll();
@@ -650,6 +658,11 @@ function readTheme(): RenderTheme {
 }
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
+
+composerCockpit = createComposerCockpit({
+  renderThinkingPanel,
+  renderActionTimeline
+});
 
 resizeCanvases();
 initProject(createBlankProject());
