@@ -29,7 +29,8 @@ type LayoutElements = {
     stopBtn: HTMLButtonElement;
     undoBtn: HTMLButtonElement;
     status: HTMLDivElement;
-    timeline: HTMLDivElement;
+    thinkingPanel: HTMLDivElement;
+    actionTimeline: HTMLDivElement;
   };
 };
 
@@ -99,9 +100,11 @@ export const createLayout = (): LayoutElements => {
   promptBox.append(promptTitle, promptArea, actionRow, status);
 
   const traceBox = el("section", { className: "trace-box" });
-  const traceTitle = el("div", { className: "rail-title", textContent: "Agent trace" });
-  const timeline = el("div", { className: "timeline" });
-  traceBox.append(traceTitle, timeline);
+  const traceTitle = el("div", { className: "rail-title", textContent: "Composer cockpit" });
+  const thinkingPanel = el("div", { className: "thinking-panel" });
+  const actionTitle = el("div", { className: "rail-subtitle", textContent: "Actions" });
+  const actionTimeline = el("div", { className: "timeline action-timeline" });
+  traceBox.append(traceTitle, thinkingPanel, actionTitle, actionTimeline);
   agent.append(promptBox, traceBox);
 
   workspace.append(rollPane, agent);
@@ -111,7 +114,7 @@ export const createLayout = (): LayoutElements => {
     root,
     controls: { fileInput, fileName, newBtn, exportBtn, playBtn, trackSelect, barStartInput, barsInput },
     stage: { corner, rulerWrap, keyboardWrap, rollWrap, rulerCanvas, gridCanvas, notesCanvas, overlayCanvas, keyboardCanvas, hudBar, hudReadout },
-    agent: { promptArea, runBtn, stopBtn, undoBtn, status, timeline }
+    agent: { promptArea, runBtn, stopBtn, undoBtn, status, thinkingPanel, actionTimeline }
   };
 };
 

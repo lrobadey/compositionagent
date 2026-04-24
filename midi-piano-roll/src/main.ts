@@ -21,6 +21,7 @@ import {
   type RenderTheme,
   type NoteLike
 } from "./lib/view/render";
+import { toolActionText } from "./ui/agentTrace";
 import { createLayout } from "./ui/layout";
 import { getState, updateState } from "./app/store";
 import type { AgentTimelineEvent } from "./app/store";
@@ -505,25 +506,68 @@ const appendTimeline = (event: AgentTimelineEvent): void => {
 };
 
 const renderTimeline = (): void => {
-  const list = layout.agent.timeline;
+  const events = getState().agent.timeline.slice(-120);
+  renderThinkingPanel(events);
+
+  const list = layout.agent.actionTimeline;
   list.innerHTML = "";
-  for (const e of getState().agent.timeline.slice(-120)) {
+  for (const e of events) {
+    if (e.type === "thinking") continue;
+    if ("name" in e && e.name === "composer_thought") continue;
+
     const item = document.createElement("div");
     item.className = `timeline-item ${e.type}`;
     if (e.type === "status" || e.type === "error") {
       item.textContent = `${e.type === "error" ? "Error" : "Status"}: ${e.message}`;
-    } else if (e.type === "thinking") {
-      const preview = e.text.length > 300 ? e.text.slice(0, 300) + "…" : e.text;
-      item.textContent = `Thinking: ${preview}`;
     } else if (e.type === "tool_applied") {
-      item.textContent = `${e.ok ? "Applied" : "Failed"} tool: ${e.name}${e.outputText ? ` - ${e.outputText}` : ""}`;
-      if (e.warnings?.length) item.textContent += ` - ${e.warnings.length} warning${e.warnings.length === 1 ? "" : "s"}`;
+      const warningText = e.warnings?.length ? `${e.warnings.length} warning${e.warnings.length === 1 ? "" : "s"}` : "";
+      item.classList.add(e.ok ? "ok" : "failed");
+      item.textContent = toolActionText(e.name, e.ok ? "applied" : "failed", warningText);
     } else {
-      item.textContent = `Tool ${e.type === "tool_call_started" ? "started" : "finished"}: ${e.name}`;
+      item.textContent = toolActionText(e.name, e.type === "tool_call_started" ? "started" : "prepared");
     }
     list.append(item);
   }
   list.scrollTop = list.scrollHeight;
+};
+
+const renderThinkingPanel = (events: AgentTimelineEvent[]): void => {
+  const panel = layout.agent.thinkingPanel;
+  panel.innerHTML = "";
+
+  const latestSummary = [...events].reverse().find((e) => e.type === "thinking");
+  const latestThought = [...events]
+    .reverse()
+    .find((e) => e.type === "tool_applied" && e.name === "composer_thought" && e.outputText);
+
+  if (!latestSummary && !latestThought) {
+    const empty = document.createElement("div");
+    empty.className = "thinking-empty";
+    empty.textContent = "Thinking summaries will appear here while the composer works.";
+    panel.append(empty);
+    return;
+  }
+
+  if (latestSummary?.type === "thinking") {
+    panel.append(thinkingBlock("OpenAI summary", latestSummary.text));
+  }
+
+  if (latestThought?.type === "tool_applied" && latestThought.outputText) {
+    panel.append(thinkingBlock("Composer thought", latestThought.outputText));
+  }
+};
+
+const thinkingBlock = (label: string, text: string): HTMLDivElement => {
+  const block = document.createElement("div");
+  block.className = "thinking-block";
+  const title = document.createElement("div");
+  title.className = "thinking-label";
+  title.textContent = label;
+  const copy = document.createElement("div");
+  copy.className = "thinking-copy";
+  copy.textContent = text.length > 700 ? `${text.slice(0, 700)}...` : text;
+  block.append(title, copy);
+  return block;
 };
 
 const undoLast = (): void => {
