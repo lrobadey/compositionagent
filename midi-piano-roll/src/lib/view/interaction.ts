@@ -18,6 +18,9 @@ export type PianoRollControllerOptions = {
   getMeasureMap: () => MeasureMap | null;
   getTempoMap: () => TempoMap | null;
   getLoopRange?: () => { startTick: number; endTick: number } | null;
+  startPlayback: (tick: number) => Promise<void>;
+  stopPlayback: () => void;
+  getPlaybackTick: () => number | null;
 
   requestRender: () => void;
   onCursor: (info: CursorInfo) => void;
@@ -50,8 +53,6 @@ export class PianoRollController {
   private spaceDownAt: number | null = null;
   private spaceUsedForDrag = false;
   private raf: number | null = null;
-  private playSeconds = 0;
-  private lastFrameMs = 0;
 
   constructor(opts: PianoRollControllerOptions) {
     this.opts = opts;
@@ -103,6 +104,7 @@ export class PianoRollController {
     this.playheadTick = Math.max(0, tick);
     this.opts.onPlayheadChange(this.playheadTick);
     this.opts.requestRender();
+    if (this.isPlaying) void this.restartPlaybackFromPlayhead();
   }
 
   clearSelection(): void {
@@ -113,19 +115,17 @@ export class PianoRollController {
 
   togglePlay(): void {
     if (this.isPlaying) this.stop();
-    else this.play();
+    else void this.play();
   }
 
-  play(): void {
-    const tempoMap = this.opts.getTempoMap();
-    if (!tempoMap) return;
+  async play(): Promise<void> {
     const { maxTick } = this.opts.getLimits();
     if (maxTick <= 0) return;
 
     this.isPlaying = true;
-    this.playSeconds = tempoMap.ticksToSeconds(this.playheadTick);
-    this.lastFrameMs = performance.now();
     this.opts.onPlayingChange(true);
+    await this.opts.startPlayback(this.playheadTick);
+    if (!this.isPlaying) return;
     this.loop();
   }
 
@@ -133,28 +133,28 @@ export class PianoRollController {
     this.isPlaying = false;
     if (this.raf != null) cancelAnimationFrame(this.raf);
     this.raf = null;
+    this.opts.stopPlayback();
     this.opts.onPlayingChange(false);
     this.opts.requestRender();
   }
 
+  private async restartPlaybackFromPlayhead(): Promise<void> {
+    this.opts.stopPlayback();
+    await this.opts.startPlayback(this.playheadTick);
+  }
+
   private loop(): void {
     if (!this.isPlaying) return;
-    const tempoMap = this.opts.getTempoMap();
-    if (!tempoMap) {
+    const nextTick = this.opts.getPlaybackTick();
+    if (nextTick == null) {
       this.stop();
       return;
     }
-    const now = performance.now();
-    const dt = (now - this.lastFrameMs) / 1000;
-    this.lastFrameMs = now;
-
-    this.playSeconds += dt;
-    const nextTick = tempoMap.secondsToTicks(this.playSeconds);
     const { maxTick } = this.opts.getLimits();
     const loop = this.opts.getLoopRange?.() ?? null;
     if (loop && nextTick >= loop.endTick) {
-      this.playSeconds = tempoMap.ticksToSeconds(loop.startTick);
       this.playheadTick = loop.startTick;
+      void this.restartPlaybackFromPlayhead();
     } else {
       this.playheadTick = Math.max(0, Math.min(maxTick, nextTick));
     }

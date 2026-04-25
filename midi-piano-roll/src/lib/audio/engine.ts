@@ -56,6 +56,14 @@ export class AudioEngine {
     return this.running;
   }
 
+  getCurrentTick(): number | null {
+    if (!this.running || !this.session || !this.ctx) return null;
+    const s = this.session;
+    const elapsed = Math.max(0, this.ctx.currentTime - s.startTime);
+    const startSeconds = s.tempoMap.ticksToSeconds(s.startTick);
+    return s.tempoMap.secondsToTicks(startSeconds + elapsed);
+  }
+
   async start(opts: AudioStartOptions): Promise<void> {
     const ctx = await this.ensureContext();
     this.stop();
@@ -107,10 +115,8 @@ export class AudioEngine {
   private schedule(): void {
     if (!this.running || !this.session || !this.ctx) return;
     const s = this.session;
-    const now = this.ctx.currentTime;
-    const elapsed = Math.max(0, now - s.startTime);
+    const elapsed = Math.max(0, this.ctx.currentTime - s.startTime);
     const startSeconds = s.tempoMap.ticksToSeconds(s.startTick);
-    const currentTick = s.tempoMap.secondsToTicks(startSeconds + elapsed);
     const horizonTick = s.tempoMap.secondsToTicks(startSeconds + elapsed + this.horizonSec);
 
     const notes = s.notes.all;

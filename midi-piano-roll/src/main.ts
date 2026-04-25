@@ -37,6 +37,7 @@ app.append(layout.root);
 const theme = readTheme();
 const camera = new Camera();
 const audio = new AudioEngine();
+let audioStartToken = 0;
 
 const rulerCtx = mustCtx(layout.stage.rulerCanvas);
 const gridCtx = mustCtx(layout.stage.gridCanvas);
@@ -46,7 +47,6 @@ const keyboardCtx = mustCtx(layout.stage.keyboardCanvas);
 
 let notesById: Map<string, Note> = new Map();
 let agentAbort: AbortController | null = null;
-let lastPlayheadTick = 0;
 const undoStack: import("./lib/compose/ops").ComposeOp[][] = [];
 let composerCockpit: ReturnType<typeof createComposerCockpit>;
 let lastThinkingPanelRenderKey = "";
@@ -104,6 +104,9 @@ const controller = new PianoRollController({
   getMeasureMap: () => getState().project.measureMap,
   getTempoMap: () => getTempoMapForTransport(),
   getLoopRange: () => null,
+  startPlayback: (tick) => startAudioFromTransport(tick),
+  stopPlayback: () => stopAudioTransport(),
+  getPlaybackTick: () => audio.getCurrentTick(),
   requestRender: () => renderAll(),
   onCursor: (info) => {
     const tick = Math.max(0, info.tick);
@@ -117,18 +120,11 @@ const controller = new PianoRollController({
   onSelectionChange: (sel) => updateInspector(sel),
   onPlayheadChange: (tick) => {
     updateState((s) => ({ ...s, transport: { ...s.transport, playheadTick: tick } }));
-    if (getState().transport.isPlaying && tick + 1 < lastPlayheadTick) {
-      audio.stop();
-      startAudioFromTransport();
-    }
-    lastPlayheadTick = tick;
     renderHud();
   },
   onPlayingChange: (isPlaying) => {
     updateState((s) => ({ ...s, transport: { ...s.transport, isPlaying } }));
     layout.controls.playBtn.textContent = isPlaying ? "Stop" : "Play";
-    if (isPlaying) startAudioFromTransport();
-    else audio.stop();
   },
   getScopeSelectEnabled: () => false,
   onScopeSelect: () => undefined
@@ -375,7 +371,14 @@ const barToTick = (mm: MeasureMap, bar: number): number => {
   return target * mm.ppq * 4;
 };
 
-const startAudioFromTransport = async (): Promise<void> => {
+const stopAudioTransport = (): void => {
+  audioStartToken += 1;
+  audio.stop();
+};
+
+const startAudioFromTransport = async (fromTick: number): Promise<void> => {
+  const token = audioStartToken + 1;
+  audioStartToken = token;
   const s = getState();
   const live = getActiveState();
   const mm = s.project.measureMap;
@@ -386,13 +389,14 @@ const startAudioFromTransport = async (): Promise<void> => {
     state: live,
     tempoMap: tm,
     measureMap: mm,
-    fromTick: s.transport.playheadTick,
+    fromTick,
     playAllTracks: false,
     selectedTrackIndex: s.project.selectedTrackIndex,
     metronomeEnabled: false,
     volume: s.transport.volume,
     tone: s.transport.tone
   });
+  if (audioStartToken !== token) audio.stop();
 };
 
 const runAgent = async (): Promise<void> => {
