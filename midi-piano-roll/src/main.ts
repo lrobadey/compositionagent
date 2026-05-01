@@ -21,7 +21,7 @@ import {
   type RenderTheme,
   type NoteLike
 } from "./lib/view/render";
-import { parseThinkingText, thinkingPanelRenderKey, toolActionText } from "./ui/agentTrace";
+import { COMPOSER_NOTE_LABEL, COMPOSITION_PROCESS_LABEL, parseThinkingText, thinkingPanelRenderKey, toolActionText } from "./ui/agentTrace";
 import { createComposerCockpit } from "./ui/cockpit";
 import { createLayout } from "./ui/layout";
 import { getState, updateState } from "./app/store";
@@ -565,11 +565,11 @@ const renderThinkingPanel = (events: AgentTimelineEvent[]): void => {
   }
 
   if (latestSummary?.type === "thinking") {
-    panel.append(thinkingBlock("Composition Process", latestSummary.text));
+    panel.append(thinkingBlock(COMPOSITION_PROCESS_LABEL, latestSummary.text));
   }
 
   if (latestThought?.type === "tool_applied" && latestThought.outputText) {
-    panel.append(thinkingBlock("Composer thought", latestThought.outputText));
+    panel.append(thinkingBlock(COMPOSER_NOTE_LABEL, latestThought.outputText));
   }
 };
 

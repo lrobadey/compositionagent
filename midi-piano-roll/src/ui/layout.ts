@@ -1,3 +1,5 @@
+import { TOOL_ACTIVITY_LABEL } from "./agentTrace";
+
 type LayoutElements = {
   root: HTMLDivElement;
   controls: {
@@ -102,7 +104,7 @@ export const createLayout = (): LayoutElements => {
   const traceBox = el("section", { className: "trace-box" });
   const traceTitle = el("div", { className: "rail-title", textContent: "Composer cockpit" });
   const thinkingPanel = el("div", { className: "thinking-panel" });
-  const actionTitle = el("div", { className: "rail-subtitle", textContent: "Actions" });
+  const actionTitle = el("div", { className: "rail-subtitle", textContent: TOOL_ACTIVITY_LABEL });
   const actionTimeline = el("div", { className: "timeline action-timeline" });
   traceBox.append(traceTitle, thinkingPanel, actionTitle, actionTimeline);
   agent.append(promptBox, traceBox);

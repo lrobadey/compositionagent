@@ -18,7 +18,7 @@ export const createComposerCockpit = (renderers: ComposerCockpitRenderers): Comp
   const append = (event: AgentTimelineEvent): void => {
     events = [...events, event];
 
-    if (event.type === "thinking") {
+    if (event.type === "thinking" || isComposerThought(event)) {
       renderers.renderThinkingPanel(events);
     } else if (event.type === "tool_call_started" || event.type === "tool_call_done" || event.type === "tool_applied") {
       renderers.renderActionTimeline(events);
@@ -38,3 +38,6 @@ export const createComposerCockpit = (renderers: ComposerCockpitRenderers): Comp
 
   return { append, flushFinalView, getEvents, reset };
 };
+
+const isComposerThought = (event: AgentTimelineEvent): boolean =>
+  event.type === "tool_applied" && event.name === "composer_thought" && Boolean(event.outputText);

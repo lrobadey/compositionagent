@@ -1,5 +1,9 @@
 import type { AgentTimelineEvent } from "../app/store";
 
+export const COMPOSITION_PROCESS_LABEL = "Composition Process";
+export const COMPOSER_NOTE_LABEL = "Composer note";
+export const TOOL_ACTIVITY_LABEL = "Tool Activity";
+
 const TOOL_LABELS: Record<string, string> = {
   place_note: "Add notes",
   add_notes: "Add notes",

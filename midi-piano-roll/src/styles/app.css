@@ -364,7 +364,7 @@ textarea {
 }
 
 .timeline:empty::before {
-  content: "Composer actions will appear here.";
+  content: "Tool activity will appear here while notes are reviewed, written, revised, or finalized.";
   color: var(--faint);
   font-size: 12px;
 }

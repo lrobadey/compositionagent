@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseThinkingText, readableToolLabel, thinkingPanelRenderKey, toolActionText } from "../ui/agentTrace";
+import { COMPOSITION_PROCESS_LABEL, parseThinkingText, readableToolLabel, thinkingPanelRenderKey, toolActionText } from "../ui/agentTrace";
 import type { AgentTimelineEvent } from "../app/store";
 
 describe("agent trace labels", () => {
@@ -19,6 +19,10 @@ describe("agent trace labels", () => {
 
   it("humanizes unknown tool names instead of rendering raw identifiers", () => {
     expect(readableToolLabel("shape_phrase_curve")).toBe("Shape Phrase Curve");
+  });
+
+  it("uses the stronger visible label for the thinking summary surface", () => {
+    expect(COMPOSITION_PROCESS_LABEL).toBe("Composition Process");
   });
 });
 
@@ -51,6 +55,18 @@ describe("thinking panel render key", () => {
     const repeated: AgentTimelineEvent[] = [
       ...first,
       { type: "status", message: "Tool churn that is not shown in the panel.", at: 2 }
+    ];
+
+    expect(thinkingPanelRenderKey(repeated)).toBe(thinkingPanelRenderKey(first));
+  });
+
+  it("stays stable when unrelated visible tool activity changes", () => {
+    const first: AgentTimelineEvent[] = [{ type: "thinking", text: "**Shaping the phrase**\n\nMoving upward.", at: 1 }];
+    const repeated: AgentTimelineEvent[] = [
+      ...first,
+      { type: "tool_call_started", name: "place_note", argsPreview: "", at: 2 },
+      { type: "tool_call_done", name: "place_note", argsPreview: "{\"pitch\":60}", at: 3 },
+      { type: "tool_applied", name: "place_note", ok: true, at: 4 }
     ];
 
     expect(thinkingPanelRenderKey(repeated)).toBe(thinkingPanelRenderKey(first));
